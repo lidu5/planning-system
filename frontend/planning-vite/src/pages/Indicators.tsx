@@ -8,6 +8,7 @@ type Indicator = { id: number; name: string; unit?: string; description?: string
 export default function Indicators() {
   const { user } = useAuth();
   const isSuperuser = !!user?.is_superuser;
+
   const [indicators, setIndicators] = useState<Indicator[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [name, setName] = useState('');
@@ -21,10 +22,7 @@ export default function Indicators() {
   const fetchAll = async () => {
     try {
       setLoading(true);
-      const [indRes, depRes] = await Promise.all([
-        api.get('/api/indicators/'),
-        api.get('/api/departments/'),
-      ]);
+      const [indRes, depRes] = await Promise.all([api.get('/api/indicators/'), api.get('/api/departments/')]);
       setIndicators(indRes.data);
       setDepartments(depRes.data);
     } catch (e: any) {
@@ -34,24 +32,20 @@ export default function Indicators() {
     }
   };
 
-  useEffect(() => {
-    fetchAll();
-  }, []);
+  useEffect(() => { fetchAll(); }, []);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!departmentId) {
+      setError('Please select a department');
+      return;
+    }
     try {
-      if (!departmentId) {
-        setError('Please select a department');
-        return;
-      }
-      const payload = { name, unit, description, department_id: departmentId } as any;
-      if (editing) {
-        await api.put(`/api/indicators/${editing.id}/`, payload);
-      } else {
-        await api.post('/api/indicators/', payload);
-      }
+      const payload = { name, unit, description, department_id: departmentId };
+      if (editing) await api.put(`/api/indicators/${editing.id}/`, payload);
+      else await api.post('/api/indicators/', payload);
+
       setName('');
       setUnit('');
       setDescription('');
@@ -82,9 +76,9 @@ export default function Indicators() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-6xl mx-auto px-6 py-8">
-        <h2 className="text-2xl font-semibold mb-4">Indicators</h2>
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-6xl mx-auto">
+        <h2 className="text-2xl font-semibold mb-6">Indicators</h2>
 
         {isSuperuser && (
           <form onSubmit={onSubmit} className="mb-6 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
@@ -93,7 +87,7 @@ export default function Indicators() {
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full border rounded px-3 py-2 focus:outline-none focus:ring"
+                className="w-full border rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-emerald-500"
                 placeholder="e.g., Fishery per square area"
                 required
               />
@@ -103,7 +97,7 @@ export default function Indicators() {
               <input
                 value={unit}
                 onChange={(e) => setUnit(e.target.value)}
-                className="w-full border rounded px-3 py-2 focus:outline-none focus:ring"
+                className="w-full border rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-emerald-500"
                 placeholder="e.g., tons, %, km²"
               />
             </div>
@@ -112,7 +106,7 @@ export default function Indicators() {
               <select
                 value={departmentId}
                 onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : '')}
-                className="w-full border rounded px-3 py-2 focus:outline-none focus:ring"
+                className="w-full border rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-emerald-500"
                 required
               >
                 <option value="">Select department</option>
@@ -122,7 +116,7 @@ export default function Indicators() {
               </select>
             </div>
             <div className="flex gap-2">
-              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                 {editing ? 'Update' : 'Create'}
               </button>
               {editing && (
@@ -135,7 +129,7 @@ export default function Indicators() {
                     setDescription('');
                     setDepartmentId('');
                   }}
-                  className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300"
+                  className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300"
                 >
                   Cancel
                 </button>
@@ -146,7 +140,7 @@ export default function Indicators() {
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full border rounded px-3 py-2 focus:outline-none focus:ring"
+                className="w-full border rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-emerald-500"
                 rows={3}
                 placeholder="Optional description"
               />
@@ -156,44 +150,69 @@ export default function Indicators() {
 
         {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
 
-        <div className="overflow-x-auto bg-white border rounded">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-gray-100 text-gray-700">
-              <tr>
-                <th className="px-4 py-2">ID</th>
-                <th className="px-4 py-2">Name</th>
-                <th className="px-4 py-2">Unit</th>
-                <th className="px-4 py-2">Department</th>
-                {isSuperuser && <th className="px-4 py-2 w-40">Actions</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
+        <div className="bg-white rounded-lg shadow overflow-hidden">
+
+          {/* Desktop Table */}
+          <div className="hidden md:block">
+            <table className="min-w-full text-left text-sm">
+              <thead className="bg-gray-100 text-gray-700">
                 <tr>
-                  <td className="px-4 py-3" colSpan={isSuperuser ? 5 : 4}>Loading...</td>
+                  <th className="px-4 py-3 font-medium">ID</th>
+                  <th className="px-4 py-3 font-medium">Name</th>
+                  <th className="px-4 py-3 font-medium">Unit</th>
+                  <th className="px-4 py-3 font-medium">Department</th>
+                  {isSuperuser && <th className="px-4 py-3 font-medium w-40">Actions</th>}
                 </tr>
-              ) : indicators.length === 0 ? (
-                <tr>
-                  <td className="px-4 py-3" colSpan={isSuperuser ? 5 : 4}>No indicators yet.</td>
-                </tr>
-              ) : (
-                indicators.map((i) => (
-                  <tr key={i.id} className="border-t">
-                    <td className="px-4 py-3">{i.id}</td>
-                    <td className="px-4 py-3">{i.name}</td>
-                    <td className="px-4 py-3">{i.unit}</td>
-                    <td className="px-4 py-3">{i.department?.name}</td>
-                    {isSuperuser && (
-                      <td className="px-4 py-3 flex gap-2">
-                        <button onClick={() => onEdit(i)} className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300">Edit</button>
-                        <button onClick={() => onDelete(i)} className="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700">Delete</button>
-                      </td>
-                    )}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td colSpan={isSuperuser ? 5 : 4} className="px-4 py-4 text-gray-500">Loading...</td></tr>
+                ) : indicators.length === 0 ? (
+                  <tr><td colSpan={isSuperuser ? 5 : 4} className="px-4 py-4 text-gray-500">No indicators yet.</td></tr>
+                ) : (
+                  indicators.map((i) => (
+                    <tr key={i.id} className="hover:bg-gray-50 transition">
+                      <td className="px-4 py-3">{i.id}</td>
+                      <td className="px-4 py-3">{i.name}</td>
+                      <td className="px-4 py-3">{i.unit}</td>
+                      <td className="px-4 py-3">{i.department?.name}</td>
+                      {isSuperuser && (
+                        <td className="px-4 py-3 flex gap-2">
+                          <button onClick={() => onEdit(i)} className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300">Edit</button>
+                          <button onClick={() => onDelete(i)} className="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700">Delete</button>
+                        </td>
+                      )}
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Cards */}
+          <div className="md:hidden p-2 space-y-3">
+            {loading ? (
+              <p className="text-gray-500 text-center py-4">Loading...</p>
+            ) : indicators.length === 0 ? (
+              <p className="text-gray-500 text-center py-4">No indicators yet.</p>
+            ) : (
+              indicators.map((i) => (
+                <div key={i.id} className="bg-white shadow rounded-lg p-4">
+                  <p className="text-sm"><span className="font-medium">ID:</span> {i.id}</p>
+                  <p className="text-sm"><span className="font-medium">Name:</span> {i.name}</p>
+                  <p className="text-sm"><span className="font-medium">Unit:</span> {i.unit}</p>
+                  <p className="text-sm"><span className="font-medium">Department:</span> {i.department?.name}</p>
+                  {isSuperuser && (
+                    <div className="flex gap-2 mt-3">
+                      <button onClick={() => onEdit(i)} className="flex-1 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">Edit</button>
+                      <button onClick={() => onDelete(i)} className="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Delete</button>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+
         </div>
       </div>
     </div>

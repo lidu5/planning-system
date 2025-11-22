@@ -136,16 +136,28 @@ export default function Performances() {
   const savePerformance = async (planId: number, quarter: 1|2|3|4, value: string) => {
     try {
       const perf = await ensurePerf(planId, quarter);
-      await api.put(`/api/performances/${perf.id}/`, { plan: planId, quarter, value, status: perf.status });
+      const val = value === '' ? '0' : Number(value).toFixed(2);
+      await api.put(`/api/performances/${perf.id}/`, { plan: planId, quarter, value: val, status: perf.status });
+      // Optimistically update local map
+      const key = `${planId}-${quarter}`;
+      setPerfs((prev) => ({ ...prev, [key]: { ...(prev[key] || perf), value: val } as Performance }));
       await loadData();
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Save performance failed');
     }
   };
 
-  const submitPerformance = async (planId: number, quarter: 1|2|3|4) => {
+  const submitPerformance = async (planId: number, quarter: 1|2|3|4, value?: string) => {
     try {
       const perf = await ensurePerf(planId, quarter);
+      // If a value is provided from the modal, persist it before submitting
+      if (typeof value === 'string') {
+        const val = value === '' ? '0' : Number(value).toFixed(2);
+        await api.put(`/api/performances/${perf.id}/`, { plan: planId, quarter, value: val, status: perf.status });
+        // Optimistically update local map
+        const key = `${planId}-${quarter}`;
+        setPerfs((prev) => ({ ...prev, [key]: { ...(prev[key] || perf), value: val } as Performance }));
+      }
       await api.post(`/api/performances/${perf.id}/submit/`);
       await loadData();
     } catch (e: any) {
@@ -281,7 +293,7 @@ export default function Performances() {
               <div className="px-5 py-4 border-t flex justify-end gap-2">
                 <button onClick={()=>setPerfModal({ open: false, planId: null, quarter: null, value: '' })} className="px-4 py-2 rounded border">Close</button>
                 <button disabled={!canEditPerformance(perfModal.planId)} onClick={()=>{ if (perfModal.planId && perfModal.quarter){ savePerformance(perfModal.planId, perfModal.quarter, perfModal.value);} setPerfModal({ open: false, planId: null, quarter: null, value: '' }); }} className={`px-4 py-2 rounded ${canEditPerformance(perfModal.planId) ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-gray-200 text-gray-500 cursor-not-allowed'}`}>Save</button>
-                <button disabled={!canEditPerformance(perfModal.planId)} onClick={()=>{ if (perfModal.planId && perfModal.quarter){ submitPerformance(perfModal.planId, perfModal.quarter);} setPerfModal({ open: false, planId: null, quarter: null, value: '' }); }} className={`px-4 py-2 rounded ${canEditPerformance(perfModal.planId) ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-200 text-gray-500 cursor-not-allowed'}`}>Submit</button>
+                <button disabled={!canEditPerformance(perfModal.planId)} onClick={()=>{ if (perfModal.planId && perfModal.quarter){ submitPerformance(perfModal.planId, perfModal.quarter, perfModal.value);} setPerfModal({ open: false, planId: null, quarter: null, value: '' }); }} className={`px-4 py-2 rounded ${canEditPerformance(perfModal.planId) ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-gray-200 text-gray-500 cursor-not-allowed'}`}>Submit</button>
               </div>
             </div>
           </div>

@@ -21,7 +21,7 @@ from django.conf.urls.static import static
 from rest_framework.routers import DefaultRouter
 from rest_framework.authtoken.views import obtain_auth_token
 from indicators.views import SectorViewSet, DepartmentViewSet, IndicatorViewSet
-from users.views import MeView, UserViewSet
+from users.views import MeView, UserViewSet, AdminStatsView, AdminTargetsBySectorView, AdminIndicatorsByDepartmentView
 from plans.views import (
     AnnualPlanViewSet,
     QuarterlyBreakdownViewSet,
@@ -45,6 +45,9 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/auth/token/', obtain_auth_token, name='api-token'),
     path('api/me/', MeView.as_view(), name='api-me'),
+    path('api/admin-stats/', AdminStatsView.as_view(), name='api-admin-stats'),
+    path('api/admin-stats/targets-by-sector/', AdminTargetsBySectorView.as_view(), name='api-admin-targets-by-sector'),
+    path('api/admin-stats/indicators-by-department/', AdminIndicatorsByDepartmentView.as_view(), name='api-admin-indicators-by-department'),
     path('', include(router.urls)),
 ]
 

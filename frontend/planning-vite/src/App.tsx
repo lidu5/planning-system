@@ -4,6 +4,9 @@ import ProtectedRoute from './routes/ProtectedRoute'
 import SuperuserRoute from './routes/SuperuserRoute'
 import StateMinisterRoute from './routes/StateMinisterRoute'
 import StrategicStaffRoute from './routes/StrategicStaffRoute'
+import ExecutiveRoute from './routes/ExecutiveRoute'
+import MinisterRoute from './routes/MinisterRoute'
+import DashboardLayout from './layouts/DashboardLayout'
 import Home from './pages/Home'
 import Sectors from './pages/Sectors'
 import Departments from './pages/Departments'
@@ -15,6 +18,8 @@ import Users from './pages/Users'
 import Reviews from './pages/Reviews'
 import Validations from './pages/Validations'
 import EntryPeriods from './pages/EntryPeriods'
+import FinalApprovals from './pages/FinalApprovals'
+import MinisterView from './pages/MinisterView'
 
 function App() {
   return (
@@ -24,7 +29,9 @@ function App() {
         path="/"
         element={
           <ProtectedRoute>
-            <Home />
+            <DashboardLayout>
+              <Home />
+            </DashboardLayout>
           </ProtectedRoute>
         }
       />
@@ -32,7 +39,9 @@ function App() {
         path="/sectors"
         element={
           <SuperuserRoute>
-            <Sectors />
+            <DashboardLayout>
+              <Sectors />
+            </DashboardLayout>
           </SuperuserRoute>
         }
       />
@@ -40,7 +49,9 @@ function App() {
         path="/departments"
         element={
           <SuperuserRoute>
-            <Departments />
+            <DashboardLayout>
+              <Departments />
+            </DashboardLayout>
           </SuperuserRoute>
         }
       />
@@ -48,7 +59,9 @@ function App() {
         path="/indicators"
         element={
           <SuperuserRoute>
-            <Indicators />
+            <DashboardLayout>
+              <Indicators />
+            </DashboardLayout>
           </SuperuserRoute>
         }
       />
@@ -56,7 +69,9 @@ function App() {
         path="/annual-plans"
         element={
           <SuperuserRoute>
-            <AnnualPlans />
+            <DashboardLayout>
+              <AnnualPlans />
+            </DashboardLayout>
           </SuperuserRoute>
         }
       />
@@ -64,7 +79,9 @@ function App() {
         path="/quarterly-breakdowns"
         element={
           <ProtectedRoute>
-            <QuarterlyBreakdowns />
+            <DashboardLayout>
+              <QuarterlyBreakdowns />
+            </DashboardLayout>
           </ProtectedRoute>
         }
       />
@@ -72,7 +89,9 @@ function App() {
         path="/performances"
         element={
           <ProtectedRoute>
-            <Performances />
+            <DashboardLayout>
+              <Performances />
+            </DashboardLayout>
           </ProtectedRoute>
         }
       />
@@ -80,7 +99,9 @@ function App() {
         path="/reviews"
         element={
           <StateMinisterRoute>
-            <Reviews />
+            <DashboardLayout>
+              <Reviews />
+            </DashboardLayout>
           </StateMinisterRoute>
         }
       />
@@ -88,7 +109,9 @@ function App() {
         path="/users"
         element={
           <SuperuserRoute>
-            <Users />
+            <DashboardLayout>
+              <Users />
+            </DashboardLayout>
           </SuperuserRoute>
         }
       />
@@ -96,7 +119,9 @@ function App() {
         path="/entry-periods"
         element={
           <SuperuserRoute>
-            <EntryPeriods />
+            <DashboardLayout>
+              <EntryPeriods />
+            </DashboardLayout>
           </SuperuserRoute>
         }
       />
@@ -104,8 +129,30 @@ function App() {
         path="/validations"
         element={
           <StrategicStaffRoute>
-            <Validations />
+            <DashboardLayout>
+              <Validations />
+            </DashboardLayout>
           </StrategicStaffRoute>
+        }
+      />
+      <Route
+        path="/final-approvals"
+        element={
+          <ExecutiveRoute>
+            <DashboardLayout>
+              <FinalApprovals />
+            </DashboardLayout>
+          </ExecutiveRoute>
+        }
+      />
+      <Route
+        path="/minister-view"
+        element={
+          <MinisterRoute>
+            <DashboardLayout>
+              <MinisterView />
+            </DashboardLayout>
+          </MinisterRoute>
         }
       />
     </Routes>
