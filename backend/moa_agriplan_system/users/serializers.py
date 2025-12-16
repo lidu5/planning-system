@@ -40,3 +40,29 @@ class UserSerializer(serializers.ModelSerializer):
             user.set_password(password)
             user.save()
         return user
+
+
+class ProfileSerializer(serializers.ModelSerializer):
+    sector = serializers.SerializerMethodField(read_only=True)
+    department = serializers.SerializerMethodField(read_only=True)
+    sector_id = serializers.PrimaryKeyRelatedField(queryset=StateMinisterSector.objects.all(), source='sector', write_only=True, allow_null=True, required=False)
+    department_id = serializers.PrimaryKeyRelatedField(queryset=Department.objects.all(), source='department', write_only=True, allow_null=True, required=False)
+    profile_picture = serializers.ImageField(required=False, allow_null=True)
+
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'first_name', 'last_name', 'email', 'role', 'is_superuser',
+            'sector', 'department', 'sector_id', 'department_id', 'profile_picture',
+        ]
+        read_only_fields = ['id', 'username', 'role']
+
+    def get_sector(self, obj):
+        if obj.sector:
+            return {'id': obj.sector.id, 'name': obj.sector.name}
+        return None
+
+    def get_department(self, obj):
+        if obj.department:
+            return {'id': obj.department.id, 'name': obj.department.name}
+        return None

@@ -1,6 +1,26 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { getCurrentEthiopianDate } from '../lib/ethiopian';
+import {
+  CheckCircle,
+  XCircle,
+  Search,
+  Filter,
+  Calendar,
+  Building,
+  TrendingUp,
+  BarChart3,
+  Clock,
+  AlertCircle,
+  ChevronRight,
+  Download,
+  RefreshCw,
+  FileText,
+  Target,
+  Award,
+  Eye
+} from 'lucide-react';
 
 type AnnualPlan = {
   id: number;
@@ -35,30 +55,31 @@ type Performance = {
 
 export default function Reviews() {
   const { user } = useAuth();
-  const [year, setYear] = useState<number | null>(null);
+  const thisYearEC = getCurrentEthiopianDate()[0];
+  const [year, setYear] = useState<number | null>(thisYearEC);
   const [plans, setPlans] = useState<AnnualPlan[]>([]);
   const [breakdowns, setBreakdowns] = useState<Breakdown[]>([]);
   const [perfs, setPerfs] = useState<Performance[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState<number | 'ALL'>('ALL');
+  const [showFilters, setShowFilters] = useState(false);
+  const [expandedView, setExpandedView] = useState<'breakdowns' | 'performance' | null>(null);
 
-  const isMinister =
-    (user?.role || '').toUpperCase() === 'STATE_MINISTER';
+  const isMinister = (user?.role || '').toUpperCase() === 'STATE_MINISTER';
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (showRefresh = false) => {
+    if (showRefresh) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
-      if (!year) {
-        setPlans([]);
-        setBreakdowns([]);
-        setPerfs([]);
-        return;
-      }
       const [plansRes, bRes, pRes] = await Promise.all([
-        api.get('/api/annual-plans/', { params: { year } }),
+        api.get('/api/annual-plans/'),
         api.get('/api/breakdowns/'),
         api.get('/api/performances/'),
       ]);
@@ -66,9 +87,10 @@ export default function Reviews() {
       setBreakdowns(bRes.data || []);
       setPerfs(pRes.data || []);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Failed to load');
+      setError(e?.response?.data?.detail || 'Failed to load data');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -92,18 +114,26 @@ export default function Reviews() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [plans]);
 
+  const toGregorianYearFromEthiopian = (etYear: number) => etYear + 7;
+
   const filterItems = <T extends { plan: number; status: string }>(list: T[]) => {
     const submitted = list.filter((item) => (item.status || '').toUpperCase() === 'SUBMITTED');
-    // Apply department filter first if selected
-    const byDept = submitted.filter((item) => {
+
+    const byYear = submitted.filter((item) => {
+      if (!year) return true;
+      const p = planById[item.plan];
+      return p?.year === toGregorianYearFromEthiopian(year);
+    });
+
+    const byDept = byYear.filter((item) => {
       if (deptFilter === 'ALL') return true;
       const p = planById[item.plan];
       return p?.department_id === deptFilter;
     });
+
     if (!query.trim()) return byDept;
 
     const q = query.toLowerCase();
-
     return byDept.filter((item) => {
       const p = planById[item.plan];
       const txt = [
@@ -121,261 +151,644 @@ export default function Reviews() {
   const filteredBreakdowns = filterItems(breakdowns);
   const filteredPerfs = filterItems(perfs);
 
+  // Statistics
+  const stats = useMemo(() => {
+    const totalPending = filteredBreakdowns.length + filteredPerfs.length;
+    const approvedBreakdowns = breakdowns.filter(b => b.status.toUpperCase() === 'APPROVED').length;
+    const approvedPerfs = perfs.filter(p => p.status.toUpperCase() === 'APPROVED').length;
+    const totalApproved = approvedBreakdowns + approvedPerfs;
+    
+    return {
+      pendingBreakdowns: filteredBreakdowns.length,
+      pendingPerformance: filteredPerfs.length,
+      totalPending,
+      totalApproved,
+      approvalRate: totalPending + totalApproved > 0 
+        ? Math.round((totalApproved / (totalPending + totalApproved)) * 100) 
+        : 0
+    };
+  }, [filteredBreakdowns, filteredPerfs, breakdowns, perfs]);
+
   const approveBreakdown = async (b: Breakdown) => {
+    if (!confirm(`Approve quarterly breakdown for this indicator?`)) return;
     try {
       await api.post(`/api/breakdowns/${b.id}/approve/`);
-      await loadData();
+      await loadData(true);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Approve failed');
+      setError(e?.response?.data?.detail || 'Approval failed');
     }
   };
 
   const rejectBreakdown = async (b: Breakdown) => {
-    const comment = window.prompt('Optional comment for rejection:', '') || '';
+    const comment = prompt('Please provide a reason for rejection (optional):', '') || '';
+    if (comment === null) return; // User cancelled
+    
+    if (!confirm(`Reject this quarterly breakdown?${comment ? `\nReason: ${comment}` : ''}`)) return;
+    
     try {
       await api.post(`/api/breakdowns/${b.id}/reject/`, { comment });
-      await loadData();
+      await loadData(true);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Reject failed');
+      setError(e?.response?.data?.detail || 'Rejection failed');
     }
   };
 
   const approvePerf = async (pr: Performance) => {
+    if (!confirm(`Approve Q${pr.quarter} performance report for this indicator?`)) return;
     try {
       await api.post(`/api/performances/${pr.id}/approve/`);
-      await loadData();
+      await loadData(true);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Approve failed');
+      setError(e?.response?.data?.detail || 'Approval failed');
     }
   };
 
   const rejectPerf = async (pr: Performance) => {
-    const comment = window.prompt('Optional comment for rejection:', '') || '';
+    const comment = prompt('Please provide a reason for rejection (optional):', '') || '';
+    if (comment === null) return;
+    
+    if (!confirm(`Reject Q${pr.quarter} performance report?${comment ? `\nReason: ${comment}` : ''}`)) return;
+    
     try {
       await api.post(`/api/performances/${pr.id}/reject/`, { comment });
-      await loadData();
+      await loadData(true);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Reject failed');
+      setError(e?.response?.data?.detail || 'Rejection failed');
     }
   };
 
+  const resetFilters = () => {
+    setYear(thisYearEC);
+    setQuery('');
+    setDeptFilter('ALL');
+  };
+
+  const hasActiveFilters = year !== thisYearEC || query || deptFilter !== 'ALL';
+
   return (
-    <div className="min-h-screen bg-gray-100 py-10 px-4">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
-          <h2 className="text-3xl font-bold text-gray-800">
-            Reviews & Approvals
-          </h2>
-
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex flex-col">
-              <label className="text-sm text-gray-600">Year</label>
-              <input
-                type="number"
-                min={2000}
-                max={2100}
-                value={year ?? ''}
-                onChange={(e) => setYear(e.target.value ? Number(e.target.value) : null)}
-                className="w-32 border rounded px-3 py-2 shadow-sm focus:outline-none focus:ring focus:ring-blue-300"
-              />
+        <div className="mb-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-6">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">Review & Approvals</h1>
+              <p className="text-gray-600 mt-2">
+                Review and approve quarterly breakdowns and performance reports from departments
+              </p>
             </div>
-
-            <div className="flex flex-col">
-              <label className="text-sm text-gray-600">Search</label>
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search indicators..."
-                className="w-48 border rounded px-3 py-2 shadow-sm focus:outline-none focus:ring focus:ring-blue-300"
-              />
-            </div>
-
-            <div className="flex flex-col">
-              <label className="text-sm text-gray-600">Department</label>
-              <select
-                value={deptFilter === 'ALL' ? 'ALL' : String(deptFilter)}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setDeptFilter(v === 'ALL' ? 'ALL' : Number(v));
-                }}
-                className="w-56 border rounded px-3 py-2 shadow-sm focus:outline-none focus:ring focus:ring-blue-300"
+            
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => loadData(true)}
+                disabled={refreshing}
+                className="inline-flex items-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors duration-200 shadow-sm disabled:opacity-50"
               >
-                <option value="ALL">All Departments</option>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
-              </select>
+                <RefreshCw className={`w-5 h-5 ${refreshing ? 'animate-spin' : ''}`} />
+                {refreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
+              
+              <button className="inline-flex items-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors duration-200 shadow-sm">
+                <Download className="w-5 h-5" />
+                Export
+              </button>
             </div>
+          </div>
+
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Pending Breakdowns</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">{stats.pendingBreakdowns}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Awaiting approval
+                  </p>
+                </div>
+                <div className="p-3 bg-blue-100 rounded-xl">
+                  <FileText className="w-6 h-6 text-blue-600" />
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Pending Performance</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">{stats.pendingPerformance}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Quarterly reports
+                  </p>
+                </div>
+                <div className="p-3 bg-emerald-100 rounded-xl">
+                  <TrendingUp className="w-6 h-6 text-emerald-600" />
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Total Pending</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">
+                    {stats.totalPending}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Items awaiting review
+                  </p>
+                </div>
+                <div className="p-3 bg-amber-100 rounded-xl">
+                  <Clock className="w-6 h-6 text-amber-600" />
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Approval Rate</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">
+                    {stats.approvalRate}%
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Of all submissions
+                  </p>
+                </div>
+                <div className="p-3 bg-purple-100 rounded-xl">
+                  <Award className="w-6 h-6 text-purple-600" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Search and Controls */}
+          <div className="space-y-4 mb-6">
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1 relative">
+                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                <input
+                  type="text"
+                  placeholder="Search by indicator, department, or sector..."
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="w-full pl-12 pr-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 shadow-sm"
+                />
+              </div>
+              
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  className="inline-flex items-center gap-2 px-4 py-3 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors duration-200 shadow-sm"
+                >
+                  <Filter className="w-4 h-4" />
+                  Filters
+                  {hasActiveFilters && (
+                    <span className="inline-flex items-center justify-center w-6 h-6 text-xs font-semibold text-white bg-emerald-600 rounded-full">
+                      {[year !== thisYearEC, query, deptFilter !== 'ALL'].filter(Boolean).length}
+                    </span>
+                  )}
+                </button>
+                
+                {hasActiveFilters && (
+                  <button
+                    onClick={resetFilters}
+                    className="inline-flex items-center gap-2 px-4 py-3 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors duration-200"
+                  >
+                    Reset All
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Filter Panel */}
+            {showFilters && (
+              <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-lg">
+                <div className="mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Filter Submissions</h3>
+                  <p className="text-sm text-gray-600">Refine your view by selecting specific criteria</p>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Year Filter */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <Calendar className="inline w-4 h-4 mr-1" />
+                      Year
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min={2000}
+                        max={2100}
+                        value={year ?? ''}
+                        onChange={(e) => setYear(e.target.value ? Number(e.target.value) : null)}
+                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200"
+                        placeholder="Enter Ethiopian year"
+                      />
+                    </div>
+                    {year !== thisYearEC && year !== null && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
+                          Year: {year} ዓ.ም
+                        </span>
+                        <button
+                          onClick={() => setYear(thisYearEC)}
+                          className="text-xs text-gray-500 hover:text-gray-700"
+                        >
+                          Reset
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Department Filter */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <Building className="inline w-4 h-4 mr-1" />
+                      Department
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={deptFilter === 'ALL' ? 'ALL' : String(deptFilter)}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setDeptFilter(v === 'ALL' ? 'ALL' : Number(v));
+                        }}
+                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 appearance-none bg-white"
+                      >
+                        <option value="ALL">All Departments</option>
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                        <ChevronRight className="w-4 h-4 text-gray-400 rotate-90" />
+                      </div>
+                    </div>
+                    {deptFilter !== 'ALL' && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">
+                          {departments.find(d => d.id === deptFilter)?.name}
+                        </span>
+                        <button
+                          onClick={() => setDeptFilter('ALL')}
+                          className="text-xs text-gray-500 hover:text-gray-700"
+                        >
+                          Reset
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Quick Year Filters */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Quick Year Select
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => setYear(thisYearEC)}
+                        className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                          year === thisYearEC
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Current ({thisYearEC})
+                      </button>
+                      <button
+                        onClick={() => setYear(thisYearEC - 1)}
+                        className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                          year === thisYearEC - 1
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        Last Year ({thisYearEC - 1})
+                      </button>
+                      <button
+                        onClick={() => setYear(null)}
+                        className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+                          year === null
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        All Years
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Error */}
+        {/* Error Display */}
         {error && (
-          <div className="mb-4 p-3 rounded bg-red-100 text-red-700 font-medium">
-            {error}
-          </div>
-        )}
-
-        {/* LOADING */}
-        {loading && (
-          <div className="text-center py-10 text-gray-600">
-            Loading data...
-          </div>
-        )}
-
-        {!loading && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Breakdowns Section */}
-            <div className="bg-white rounded-xl shadow-md overflow-hidden">
-              <div className="px-4 py-3 bg-gray-50 border-b font-semibold text-gray-700">
-                Quarterly Breakdowns (Submitted)
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-red-500" />
+              <div>
+                <p className="font-medium text-red-700">Error</p>
+                <p className="text-sm text-red-600 mt-1">{error}</p>
               </div>
+            </div>
+          </div>
+        )}
 
-              {filteredBreakdowns.length === 0 ? (
-                <p className="p-5 text-gray-500 text-sm">
-                  No submitted breakdowns.
+        {/* Main Content */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Quarterly Breakdowns Card */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-blue-100">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-100 rounded-lg">
+                    <FileText className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">Quarterly Breakdowns</h3>
+                    <p className="text-sm text-blue-600">
+                      {filteredBreakdowns.length} pending • {breakdowns.filter(b => b.status.toUpperCase() === 'APPROVED').length} approved
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setExpandedView(expandedView === 'breakdowns' ? null : 'breakdowns')}
+                  className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                >
+                  {expandedView === 'breakdowns' ? 'Collapse' : 'Expand'}
+                  <ChevronRight className={`w-4 h-4 transition-transform ${expandedView === 'breakdowns' ? 'rotate-90' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            {loading ? (
+              <div className="p-12 text-center">
+                <div className="w-8 h-8 border-3 border-gray-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
+                <p className="text-gray-600">Loading breakdowns...</p>
+              </div>
+            ) : filteredBreakdowns.length === 0 ? (
+              <div className="p-12 text-center">
+                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <FileText className="w-6 h-6 text-gray-400" />
+                </div>
+                <p className="text-gray-600 font-medium">No pending breakdowns</p>
+                <p className="text-gray-500 text-sm mt-1">
+                  All quarterly breakdowns have been reviewed or none are submitted yet
                 </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-100 text-gray-700">
-                      <tr>
-                        <th className="px-4 py-2">Indicator</th>
-                        <th className="px-4 py-2">Target</th>
-                        <th className="px-4 py-2">Q1</th>
-                        <th className="px-4 py-2">Q2</th>
-                        <th className="px-4 py-2">Q3</th>
-                        <th className="px-4 py-2">Q4</th>
-                        <th className="px-4 py-2 text-center">Actions</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {filteredBreakdowns.map((b) => {
-                        const p = planById[b.plan];
-                        return (
-                          <tr key={b.id} className="border-t hover:bg-gray-50">
-                            <td className="px-4 py-3">
-                              <div className="font-medium">
-                                {p?.indicator_name}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Indicator</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Annual Target</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quarterly Allocation</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {filteredBreakdowns.map((b) => {
+                      const p = planById[b.plan];
+                      const quarters = [
+                        { label: 'Q1', value: b.q1 },
+                        { label: 'Q2', value: b.q2 },
+                        { label: 'Q3', value: b.q3 },
+                        { label: 'Q4', value: b.q4 },
+                      ];
+                      
+                      return (
+                        <tr key={b.id} className="hover:bg-gray-50 transition-colors duration-150">
+                          <td className="px-6 py-4">
+                            <div className="flex items-start gap-3">
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">{p?.indicator_name}</div>
+                                <div className="text-sm text-gray-500 mt-1">
+                                  <span className="flex items-center gap-1">
+                                    <Building className="w-3 h-3" />
+                                    {p?.department_name}
+                                  </span>
+                                  {p?.indicator_unit && (
+                                    <span className="inline-block mt-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">
+                                      Unit: {p.indicator_unit}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-                              <div className="text-xs text-gray-500">
-                                {p?.department_name} • {p?.sector_name}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">{p?.target}</td>
-                            <td className="px-4 py-3">{b.q1}</td>
-                            <td className="px-4 py-3">{b.q2}</td>
-                            <td className="px-4 py-3">{b.q3}</td>
-                            <td className="px-4 py-3">{b.q4}</td>
-                            <td className="px-4 py-3 text-center">
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="text-lg font-bold text-emerald-700">{p?.target}</div>
+                            <div className="text-xs text-gray-500 mt-1">Annual target</div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex gap-2">
+                              {quarters.map((q, idx) => (
+                                <div key={idx} className="text-center">
+                                  <div className="text-xs text-gray-500">{q.label}</div>
+                                  <div className={`text-sm font-semibold ${q.value ? 'text-gray-900' : 'text-gray-400'}`}>
+                                    {q.value || '—'}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex gap-2">
                               <button
-                                disabled={!isMinister}
                                 onClick={() => approveBreakdown(b)}
-                                className={`px-3 py-1 rounded-md ${
+                                disabled={!isMinister}
+                                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-colors duration-200 ${
                                   isMinister
-                                    ? 'bg-green-600 hover:bg-green-700 text-white'
+                                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                                     : 'bg-gray-200 text-gray-500 cursor-not-allowed'
                                 }`}
                               >
+                                <CheckCircle className="w-4 h-4" />
                                 Approve
                               </button>
-
                               <button
-                                disabled={!isMinister}
                                 onClick={() => rejectBreakdown(b)}
-                                className={`ml-2 px-3 py-1 rounded-md ${
+                                disabled={!isMinister}
+                                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-colors duration-200 ${
                                   isMinister
                                     ? 'bg-red-600 hover:bg-red-700 text-white'
                                     : 'bg-gray-200 text-gray-500 cursor-not-allowed'
                                 }`}
                               >
+                                <XCircle className="w-4 h-4" />
                                 Reject
                               </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Quarterly Performance Card */}
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-emerald-50 to-green-100">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-emerald-100 rounded-lg">
+                    <TrendingUp className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">Quarterly Performance</h3>
+                    <p className="text-sm text-emerald-600">
+                      {filteredPerfs.length} pending • {perfs.filter(p => p.status.toUpperCase() === 'APPROVED').length} approved
+                    </p>
+                  </div>
                 </div>
-              )}
+                <button
+                  onClick={() => setExpandedView(expandedView === 'performance' ? null : 'performance')}
+                  className="text-sm text-emerald-600 hover:text-emerald-800 font-medium flex items-center gap-1"
+                >
+                  {expandedView === 'performance' ? 'Collapse' : 'Expand'}
+                  <ChevronRight className={`w-4 h-4 transition-transform ${expandedView === 'performance' ? 'rotate-90' : ''}`} />
+                </button>
+              </div>
             </div>
 
-            {/* Performance Section */}
-            <div className="bg-white rounded-xl shadow-md overflow-hidden">
-              <div className="px-4 py-3 bg-gray-50 border-b font-semibold text-gray-700">
-                Quarterly Performance (Submitted)
+            {loading ? (
+              <div className="p-12 text-center">
+                <div className="w-8 h-8 border-3 border-gray-300 border-t-emerald-600 rounded-full animate-spin mx-auto mb-3"></div>
+                <p className="text-gray-600">Loading performance reports...</p>
               </div>
-
-              {filteredPerfs.length === 0 ? (
-                <p className="p-5 text-gray-500 text-sm">
-                  No submitted performance reports.
+            ) : filteredPerfs.length === 0 ? (
+              <div className="p-12 text-center">
+                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <TrendingUp className="w-6 h-6 text-gray-400" />
+                </div>
+                <p className="text-gray-600 font-medium">No pending performance reports</p>
+                <p className="text-gray-500 text-sm mt-1">
+                  All performance reports have been reviewed or none are submitted yet
                 </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-100 text-gray-700">
-                      <tr>
-                        <th className="px-4 py-2">Indicator</th>
-                        <th className="px-4 py-2">Quarter</th>
-                        <th className="px-4 py-2">Value</th>
-                        <th className="px-4 py-2 text-center">Actions</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {filteredPerfs.map((pr) => {
-                        const p = planById[pr.plan];
-                        return (
-                          <tr key={pr.id} className="border-t hover:bg-gray-50">
-                            <td className="px-4 py-3">
-                              <div className="font-medium">
-                                {p?.indicator_name}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Indicator</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quarter</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reported Value</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {filteredPerfs.map((pr) => {
+                      const p = planById[pr.plan];
+                      const targetValue = parseFloat(p?.target || '0');
+                      const reportedValue = parseFloat(pr.value || '0');
+                      const achievementRate = targetValue > 0 ? (reportedValue / targetValue) * 100 : 0;
+                      
+                      return (
+                        <tr key={pr.id} className="hover:bg-gray-50 transition-colors duration-150">
+                          <td className="px-6 py-4">
+                            <div className="flex items-start gap-3">
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900">{p?.indicator_name}</div>
+                                <div className="text-sm text-gray-500 mt-1">
+                                  <span className="flex items-center gap-1">
+                                    <Building className="w-3 h-3" />
+                                    {p?.department_name}
+                                  </span>
+                                </div>
+                                {p?.indicator_unit && (
+                                  <span className="inline-block mt-1 px-2 py-1 bg-emerald-100 text-emerald-700 text-xs rounded-full">
+                                    Unit: {p.indicator_unit}
+                                  </span>
+                                )}
                               </div>
-                              <div className="text-xs text-gray-500">
-                                {p?.department_name} • {p?.sector_name}
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">Q{pr.quarter}</td>
-                            <td className="px-4 py-3">{pr.value}</td>
-
-                            <td className="px-4 py-3 text-center">
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="inline-flex items-center px-3 py-1.5 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                              Quarter {pr.quarter}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-1">
+                              Annual target: {p?.target}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div>
+                              <div className="text-lg font-bold text-gray-900">{pr.value}</div>
+                              {!isNaN(achievementRate) && (
+                                <div className={`text-sm font-medium mt-1 ${
+                                  achievementRate >= 100 ? 'text-emerald-600' :
+                                  achievementRate >= 80 ? 'text-amber-600' :
+                                  'text-red-600'
+                                }`}>
+                                  {achievementRate.toFixed(1)}% of target
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex gap-2">
                               <button
-                                disabled={!isMinister}
                                 onClick={() => approvePerf(pr)}
-                                className={`px-3 py-1 rounded-md ${
+                                disabled={!isMinister}
+                                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-colors duration-200 ${
                                   isMinister
-                                    ? 'bg-green-600 hover:bg-green-700 text-white'
+                                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                                     : 'bg-gray-200 text-gray-500 cursor-not-allowed'
                                 }`}
                               >
+                                <CheckCircle className="w-4 h-4" />
                                 Approve
                               </button>
-
                               <button
-                                disabled={!isMinister}
                                 onClick={() => rejectPerf(pr)}
-                                className={`ml-2 px-3 py-1 rounded-md ${
+                                disabled={!isMinister}
+                                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg transition-colors duration-200 ${
                                   isMinister
                                     ? 'bg-red-600 hover:bg-red-700 text-white'
                                     : 'bg-gray-200 text-gray-500 cursor-not-allowed'
                                 }`}
                               >
+                                <XCircle className="w-4 h-4" />
                                 Reject
                               </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Quick Stats Footer */}
+        <div className="mt-6 p-6 bg-white rounded-2xl border border-gray-200 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-gray-600">
+              Showing {filteredBreakdowns.length + filteredPerfs.length} pending items
+              {hasActiveFilters && ' (filtered)'}
+            </div>
+            <div className="text-sm text-gray-600">
+              {!isMinister && (
+                <div className="flex items-center gap-2 text-amber-600">
+                  <AlertCircle className="w-4 h-4" />
+                  Only State Ministers can approve submissions
                 </div>
               )}
             </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

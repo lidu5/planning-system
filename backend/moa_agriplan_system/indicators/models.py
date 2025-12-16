@@ -20,11 +20,23 @@ class Department(models.Model):
         return f"{self.name} - {self.sector.name}"
 
 
+class IndicatorGroup(models.Model):
+    name = models.CharField(max_length=255)
+    department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name='indicator_groups')
+
+    class Meta:
+        unique_together = ('name', 'department')
+
+    def __str__(self):
+        return f"{self.name} ({self.department.name})"
+
+
 class Indicator(models.Model):
     name = models.CharField(max_length=255)
     unit = models.CharField(max_length=64, blank=True)
     description = models.TextField(blank=True)
     department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name='indicators')
+    groups = models.ManyToManyField(IndicatorGroup, blank=True, related_name='indicators')
 
     class Meta:
         unique_together = ('name', 'department')

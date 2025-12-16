@@ -138,7 +138,13 @@ export default function Home() {
               <p className="text-white/90 text-sm md:text-base max-w-2xl">
                 Empowering sustainable agricultural growth through planning, performance, and accountability.
                 Welcome{user ? `, ${user.username}` : ''}.
-                {user?.role ? ` Your role: ${String(user.role).replace(/_/g, ' ')}` : ''}
+                {user && (
+                  user.is_superuser
+                    ? ' Your role: SUPERUSER'
+                    : user.role
+                      ? ` Your role: ${String(user.role).replace(/_/g, ' ')}`
+                      : ''
+                )}
               </p>
             </div>
           </div>

@@ -3,6 +3,7 @@ import api from '../lib/api';
 
 export type User = {
   username: string;
+  email?: string;
   role?: string;
   sector?: number | null;
   department?: number | null;
@@ -31,6 +32,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const res = await api.get('/api/me/');
           setUser({
             username: res.data?.username,
+            email: res.data?.email,
             role: res.data?.role,
             sector: res.data?.sector ?? null,
             department: res.data?.department ?? null,

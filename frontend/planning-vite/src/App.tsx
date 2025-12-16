@@ -6,11 +6,13 @@ import StateMinisterRoute from './routes/StateMinisterRoute'
 import StrategicStaffRoute from './routes/StrategicStaffRoute'
 import ExecutiveRoute from './routes/ExecutiveRoute'
 import MinisterRoute from './routes/MinisterRoute'
+import ActivityLogRoute from './routes/ActivityLogRoute'
 import DashboardLayout from './layouts/DashboardLayout'
 import Home from './pages/Home'
 import Sectors from './pages/Sectors'
 import Departments from './pages/Departments'
 import Indicators from './pages/Indicators'
+import IndicatorGroups from './pages/IndicatorGroups'
 import AnnualPlans from './pages/AnnualPlans'
 import QuarterlyBreakdowns from './pages/QuarterlyBreakdowns'
 import Performances from './pages/Performances'
@@ -20,6 +22,10 @@ import Validations from './pages/Validations'
 import EntryPeriods from './pages/EntryPeriods'
 import FinalApprovals from './pages/FinalApprovals'
 import MinisterView from './pages/MinisterView'
+import ActivityLogs from './pages/ActivityLogs'
+import ProfilePage from './pages/Profile'
+import AdvisorCommentSubmit from './pages/AdvisorCommentSubmit'
+import AdvisorCommentsView from './pages/AdvisorCommentsView'
 
 function App() {
   return (
@@ -66,6 +72,16 @@ function App() {
         }
       />
       <Route
+        path="/indicator-groups"
+        element={
+          <SuperuserRoute>
+            <DashboardLayout>
+              <IndicatorGroups />
+            </DashboardLayout>
+          </SuperuserRoute>
+        }
+      />
+      <Route
         path="/annual-plans"
         element={
           <SuperuserRoute>
@@ -73,6 +89,16 @@ function App() {
               <AnnualPlans />
             </DashboardLayout>
           </SuperuserRoute>
+        }
+      />
+      <Route
+        path="/activity-logs"
+        element={
+          <ActivityLogRoute>
+            <DashboardLayout>
+              <ActivityLogs />
+            </DashboardLayout>
+          </ActivityLogRoute>
         }
       />
       <Route
@@ -91,6 +117,26 @@ function App() {
           <ProtectedRoute>
             <DashboardLayout>
               <Performances />
+            </DashboardLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/advisor-comment"
+        element={
+          <ProtectedRoute>
+            <DashboardLayout>
+              <AdvisorCommentSubmit />
+            </DashboardLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/advisor-comments"
+        element={
+          <ProtectedRoute>
+            <DashboardLayout>
+              <AdvisorCommentsView />
             </DashboardLayout>
           </ProtectedRoute>
         }
@@ -153,6 +199,16 @@ function App() {
               <MinisterView />
             </DashboardLayout>
           </MinisterRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <DashboardLayout>
+              <ProfilePage />
+            </DashboardLayout>
+          </ProtectedRoute>
         }
       />
     </Routes>

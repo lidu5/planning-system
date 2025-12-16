@@ -1,9 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { getErrorMessage } from '../lib/error';
+import { 
+  Plus, 
+  Edit2, 
+  Trash2, 
+  Search, 
+  ChevronLeft, 
+  ChevronRight,
+  Filter,
+  X,
+  Save,
+  Layers,
+  Building,
+  Tag,
+  Hash
+} from 'lucide-react';
 
 type Department = { id: number; name: string; sector?: { id: number; name: string } };
-type Indicator = { id: number; name: string; unit?: string; description?: string; department: Department };
+type IndicatorGroup = { id: number; name: string; department: Department };
+type Indicator = { id: number; name: string; unit?: string; description?: string; department: Department; groups?: IndicatorGroup[] };
+type Sector = { id: number; name: string };
 
 export default function Indicators() {
   const { user } = useAuth();
@@ -11,28 +29,105 @@ export default function Indicators() {
 
   const [indicators, setIndicators] = useState<Indicator[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [sectors, setSectors] = useState<Sector[]>([]);
   const [name, setName] = useState('');
   const [unit, setUnit] = useState('');
   const [description, setDescription] = useState('');
+  const [sectorId, setSectorId] = useState<number | ''>('');
   const [departmentId, setDepartmentId] = useState<number | ''>('');
+  const [groups, setGroups] = useState<IndicatorGroup[]>([]);
+  const [groupIds, setGroupIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Indicator | null>(null);
+  const [page, setPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({
+    sector: '',
+    department: '',
+    hasGroup: ''
+  });
+  const pageSize = 15;
 
   const fetchAll = async () => {
     try {
       setLoading(true);
-      const [indRes, depRes] = await Promise.all([api.get('/api/indicators/'), api.get('/api/departments/')]);
+      const [indRes, depRes, secRes] = await Promise.all([
+        api.get('/api/indicators/'),
+        api.get('/api/departments/'),
+        api.get('/api/sectors/'),
+      ]);
       setIndicators(indRes.data);
       setDepartments(depRes.data);
+      setSectors(secRes.data);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Failed to load data');
+      const msg = e?.userMessage || getErrorMessage(e, 'Failed to load data');
+      setError(msg);
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => {
+    setPage(1);
+  }, [indicators.length]);
+
+  const filteredIndicators = useMemo(() => {
+    return indicators.filter(indicator => {
+      // Search filter
+      const matchesSearch = searchQuery === '' || 
+        indicator.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        indicator.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        indicator.department.name.toLowerCase().includes(searchQuery.toLowerCase());
+
+      // Sector filter
+      const matchesSector = filters.sector === '' || 
+        indicator.department.sector?.id.toString() === filters.sector;
+
+      // Department filter
+      const matchesDepartment = filters.department === '' || 
+        indicator.department.id.toString() === filters.department;
+
+      // Group filter
+      const matchesGroup = filters.hasGroup === '' || 
+        (filters.hasGroup === 'yes' ? (indicator.groups && indicator.groups.length > 0) : 
+         filters.hasGroup === 'no' ? (!indicator.groups || indicator.groups.length === 0) : true);
+
+      return matchesSearch && matchesSector && matchesDepartment && matchesGroup;
+    });
+  }, [indicators, searchQuery, filters]);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredIndicators.length / pageSize)),
+    [filteredIndicators.length, pageSize]
+  );
+
+  const paged = useMemo(
+    () => filteredIndicators.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize),
+    [filteredIndicators, page, pageSize]
+  );
+
   useEffect(() => { fetchAll(); }, []);
+
+  useEffect(() => {
+    const loadGroups = async () => {
+      if (!departmentId) { setGroups([]); setGroupIds([]); return; }
+      try {
+        const res = await api.get(`/api/indicator-groups`, { params: { department: departmentId } });
+        setGroups(res.data);
+      } catch (e: any) {
+        // keep silent, optional field
+        setGroups([]);
+      }
+    };
+    loadGroups();
+  }, [departmentId]);
+
+  const filteredDepartments = useMemo(() => {
+    if (!sectorId) return departments;
+    return departments.filter((d) => (d.sector?.id ?? null) === sectorId);
+  }, [departments, sectorId]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,18 +137,21 @@ export default function Indicators() {
       return;
     }
     try {
-      const payload = { name, unit, description, department_id: departmentId };
+      const payload = { name, unit, description, department_id: departmentId, group_ids: groupIds };
       if (editing) await api.put(`/api/indicators/${editing.id}/`, payload);
       else await api.post('/api/indicators/', payload);
 
       setName('');
       setUnit('');
       setDescription('');
+      setSectorId('');
       setDepartmentId('');
+      setGroupIds([]);
       setEditing(null);
       fetchAll();
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Save failed');
+      const msg = e?.userMessage || getErrorMessage(e, 'Save failed');
+      setError(msg);
     }
   };
 
@@ -62,7 +160,10 @@ export default function Indicators() {
     setName(i.name);
     setUnit(i.unit || '');
     setDescription(i.description || '');
+    const sec = i.department?.sector?.id ? Number(i.department.sector.id) : '';
+    setSectorId(sec as any);
     setDepartmentId(i.department.id);
+    setGroupIds((i.groups || []).map((g) => g.id));
   };
 
   const onDelete = async (i: Indicator) => {
@@ -71,115 +172,437 @@ export default function Indicators() {
       await api.delete(`/api/indicators/${i.id}/`);
       fetchAll();
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Delete failed');
+      const msg = e?.userMessage || getErrorMessage(e, 'Delete failed');
+      setError(msg);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-6xl mx-auto">
-        <h2 className="text-2xl font-semibold mb-6">Indicators</h2>
+  const resetFilters = () => {
+    setSearchQuery('');
+    setFilters({ sector: '', department: '', hasGroup: '' });
+  };
 
-        {isSuperuser && (
-          <form onSubmit={onSubmit} className="mb-6 grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+  const hasActiveFilters = searchQuery || filters.sector || filters.department || filters.hasGroup;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 md:p-6">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
             <div>
-              <label className="block text-sm text-gray-700 mb-1">Name</label>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-emerald-500"
-                placeholder="e.g., Fishery per square area"
-                required
-              />
+              <h1 className="text-3xl font-bold text-gray-900">Indicators</h1>
+              <p className="text-gray-600 mt-2">Manage and track performance indicators across departments</p>
             </div>
-            <div>
-              <label className="block text-sm text-gray-700 mb-1">Unit</label>
-              <input
-                value={unit}
-                onChange={(e) => setUnit(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-emerald-500"
-                placeholder="e.g., tons, %, km²"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-700 mb-1">Department</label>
-              <select
-                value={departmentId}
-                onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : '')}
-                className="w-full border rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-emerald-500"
-                required
+            {isSuperuser && (
+              <button
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                className="inline-flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl"
               >
-                <option value="">Select department</option>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex gap-2">
-              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                {editing ? 'Update' : 'Create'}
+                <Plus className="w-5 h-5" />
+                Add New Indicator
               </button>
-              {editing && (
+            )}
+          </div>
+
+          {/* Search and Filters */}
+          <div className="space-y-4">
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Search indicators by name, description, or department..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-12 pr-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 shadow-sm"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => setShowFilters(!showFilters)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors duration-200 shadow-sm"
+              >
+                <Filter className="w-4 h-4" />
+                Filters
+                {(filters.sector || filters.department || filters.hasGroup) && (
+                  <span className="w-2 h-2 bg-blue-600 rounded-full"></span>
+                )}
+              </button>
+
+              {hasActiveFilters && (
                 <button
-                  type="button"
-                  onClick={() => {
-                    setEditing(null);
-                    setName('');
-                    setUnit('');
-                    setDescription('');
-                    setDepartmentId('');
-                  }}
-                  className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300"
+                  onClick={resetFilters}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 text-gray-700 bg-gray-100 rounded-xl hover:bg-gray-200 transition-colors duration-200"
                 >
-                  Cancel
+                  <X className="w-4 h-4" />
+                  Clear All
                 </button>
               )}
             </div>
-            <div className="md:col-span-4">
-              <label className="block text-sm text-gray-700 mb-1">Description</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full border rounded-lg px-3 py-2 shadow-sm focus:ring-2 focus:ring-emerald-500"
-                rows={3}
-                placeholder="Optional description"
-              />
+
+            {/* Filter Panel */}
+            {showFilters && (
+              <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-lg">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Sector</label>
+                    <select
+                      value={filters.sector}
+                      onChange={(e) => setFilters({...filters, sector: e.target.value})}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    >
+                      <option value="">All Sectors</option>
+                      {sectors.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
+                    <select
+                      value={filters.department}
+                      onChange={(e) => setFilters({...filters, department: e.target.value})}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    >
+                      <option value="">All Departments</option>
+                      {departments.map((d) => (
+                        <option key={d.id} value={d.id}>{d.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Has Groups</label>
+                    <select
+                      value={filters.hasGroup}
+                      onChange={(e) => setFilters({...filters, hasGroup: e.target.value})}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    >
+                      <option value="">All</option>
+                      <option value="yes">With Groups</option>
+                      <option value="no">Without Groups</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Create/Edit Form */}
+        {isSuperuser && (
+          <div className="mb-8 bg-white rounded-2xl border border-gray-200 shadow-lg p-6 transition-all duration-300 hover:shadow-xl">
+            <div className="flex items-center gap-3 mb-6">
+              <div className={`p-2 rounded-lg ${editing ? 'bg-yellow-100' : 'bg-blue-100'}`}>
+                {editing ? <Edit2 className="w-5 h-5 text-yellow-600" /> : <Plus className="w-5 h-5 text-blue-600" />}
+              </div>
+              <div>
+                <h3 className="font-semibold text-lg text-gray-900">
+                  {editing ? `Editing "${editing.name}"` : 'Create New Indicator'}
+                </h3>
+                <p className="text-sm text-gray-600">
+                  {editing ? 'Update the indicator details below' : 'Fill in the details to create a new indicator'}
+                </p>
+              </div>
             </div>
-          </form>
+
+            <form onSubmit={onSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Hash className="inline w-4 h-4 mr-1" />
+                    Indicator Name
+                  </label>
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="e.g., Fishery per square area"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Tag className="inline w-4 h-4 mr-1" />
+                    Unit
+                  </label>
+                  <input
+                    value={unit}
+                    onChange={(e) => setUnit(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    placeholder="e.g., tons, %, km²"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Building className="inline w-4 h-4 mr-1" />
+                    Sector
+                  </label>
+                  <select
+                    value={sectorId}
+                    onChange={(e) => {
+                      const v = e.target.value ? Number(e.target.value) : '';
+                      setSectorId(v as any);
+                      setDepartmentId('');
+                      setGroupIds([]);
+                    }}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  >
+                    <option value="">All sectors</option>
+                    {sectors.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Building className="inline w-4 h-4 mr-1" />
+                    Department *
+                  </label>
+                  <select
+                    value={departmentId}
+                    onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : '')}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    required
+                  >
+                    <option value="">Select department</option>
+                    {filteredDepartments.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <Layers className="inline w-4 h-4 mr-1" />
+                  Groups (optional)
+                </label>
+                <select
+                  multiple
+                  value={groupIds.map(String)}
+                  onChange={(e) => {
+                    const selected = Array.from(e.target.selectedOptions).map((opt) => Number(opt.value));
+                    setGroupIds(selected);
+                  }}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 min-h-[120px]"
+                  disabled={!departmentId}
+                  title={!departmentId ? 'Select a department first' : undefined}
+                >
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+                {groupIds.length > 0 && (
+                  <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-100">
+                    <p className="text-sm font-medium text-blue-800 mb-2">Selected Groups ({groupIds.length})</p>
+                    <div className="flex flex-wrap gap-2">
+                      {groups
+                        .filter((g) => groupIds.includes(g.id))
+                        .map((g) => (
+                          <span
+                            key={g.id}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-sm"
+                          >
+                            {g.name}
+                            <button
+                              type="button"
+                              onClick={() => setGroupIds(prev => prev.filter(id => id !== g.id))}
+                              className="ml-1 text-blue-500 hover:text-blue-700"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                  rows={3}
+                  placeholder="Enter a detailed description for this indicator..."
+                />
+              </div>
+
+              {error && (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+                  <p className="text-sm text-red-600">{error}</p>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+                >
+                  <Save className="w-5 h-5" />
+                  {editing ? 'Update Indicator' : 'Create Indicator'}
+                </button>
+                {editing && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditing(null);
+                      setName('');
+                      setUnit('');
+                      setDescription('');
+                      setSectorId('');
+                      setDepartmentId('');
+                    }}
+                    className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors duration-200"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
         )}
 
-        {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
+        {/* Results Summary */}
+        <div className="mb-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">
+                Indicators ({filteredIndicators.length})
+              </h3>
+              <p className="text-sm text-gray-600">
+                Showing {paged.length} of {filteredIndicators.length} indicators
+              </p>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-sm text-gray-600">
+                Page {page} of {totalPages}
+              </div>
+            </div>
+          </div>
+        </div>
 
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-
+        {/* Indicators Table/Cards */}
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
           {/* Desktop Table */}
-          <div className="hidden md:block">
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-gray-100 text-gray-700">
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                 <tr>
-                  <th className="px-4 py-3 font-medium">ID</th>
-                  <th className="px-4 py-3 font-medium">Name</th>
-                  <th className="px-4 py-3 font-medium">Unit</th>
-                  <th className="px-4 py-3 font-medium">Department</th>
-                  {isSuperuser && <th className="px-4 py-3 font-medium w-40">Actions</th>}
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">ID</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Indicator</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Unit</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Department</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Sector</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Groups</th>
+                  {isSuperuser && <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>}
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-gray-200">
                 {loading ? (
-                  <tr><td colSpan={isSuperuser ? 5 : 4} className="px-4 py-4 text-gray-500">Loading...</td></tr>
-                ) : indicators.length === 0 ? (
-                  <tr><td colSpan={isSuperuser ? 5 : 4} className="px-4 py-4 text-gray-500">No indicators yet.</td></tr>
+                  <tr>
+                    <td colSpan={isSuperuser ? 7 : 6} className="px-6 py-12 text-center">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-8 h-8 border-3 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
+                        <p className="text-gray-600">Loading indicators...</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : paged.length === 0 ? (
+                  <tr>
+                    <td colSpan={isSuperuser ? 7 : 6} className="px-6 py-12 text-center">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
+                          <Search className="w-6 h-6 text-gray-400" />
+                        </div>
+                        <p className="text-gray-600 font-medium">No indicators found</p>
+                        <p className="text-gray-500 text-sm">Try adjusting your search or filters</p>
+                      </div>
+                    </td>
+                  </tr>
                 ) : (
-                  indicators.map((i) => (
-                    <tr key={i.id} className="hover:bg-gray-50 transition">
-                      <td className="px-4 py-3">{i.id}</td>
-                      <td className="px-4 py-3">{i.name}</td>
-                      <td className="px-4 py-3">{i.unit}</td>
-                      <td className="px-4 py-3">{i.department?.name}</td>
+                  paged.map((i) => (
+                    <tr 
+                      key={i.id} 
+                      className="hover:bg-blue-50/50 transition-colors duration-150 group"
+                    >
+                      <td className="px-6 py-4">
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                          #{i.id}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div>
+                          <p className="font-medium text-gray-900">{i.name}</p>
+                          {i.description && (
+                            <p className="text-sm text-gray-600 mt-1 line-clamp-1">{i.description}</p>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        {i.unit ? (
+                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                            {i.unit}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <Building className="w-4 h-4 text-gray-400" />
+                          <span className="text-gray-700">{i.department?.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        {i.department?.sector?.name ? (
+                          <span className="text-gray-700">{i.department.sector.name}</span>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        {(i.groups && i.groups.length > 0) ? (
+                          <div className="flex flex-wrap gap-1 max-w-xs">
+                            {i.groups.slice(0, 3).map((g) => (
+                              <span
+                                key={g.id}
+                                className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800"
+                                title={g.name}
+                              >
+                                {g.name.length > 20 ? g.name.substring(0, 20) + '...' : g.name}
+                              </span>
+                            ))}
+                            {i.groups.length > 3 && (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                                +{i.groups.length - 3} more
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
                       {isSuperuser && (
-                        <td className="px-4 py-3 flex gap-2">
-                          <button onClick={() => onEdit(i)} className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300">Edit</button>
-                          <button onClick={() => onDelete(i)} className="px-3 py-1 rounded bg-red-600 text-white hover:bg-red-700">Delete</button>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                            <button
+                              onClick={() => onEdit(i)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors duration-200"
+                              title="Edit indicator"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => onDelete(i)}
+                              className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors duration-200"
+                              title="Delete indicator"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -190,30 +613,159 @@ export default function Indicators() {
           </div>
 
           {/* Mobile Cards */}
-          <div className="md:hidden p-2 space-y-3">
+          <div className="md:hidden">
             {loading ? (
-              <p className="text-gray-500 text-center py-4">Loading...</p>
-            ) : indicators.length === 0 ? (
-              <p className="text-gray-500 text-center py-4">No indicators yet.</p>
-            ) : (
-              indicators.map((i) => (
-                <div key={i.id} className="bg-white shadow rounded-lg p-4">
-                  <p className="text-sm"><span className="font-medium">ID:</span> {i.id}</p>
-                  <p className="text-sm"><span className="font-medium">Name:</span> {i.name}</p>
-                  <p className="text-sm"><span className="font-medium">Unit:</span> {i.unit}</p>
-                  <p className="text-sm"><span className="font-medium">Department:</span> {i.department?.name}</p>
-                  {isSuperuser && (
-                    <div className="flex gap-2 mt-3">
-                      <button onClick={() => onEdit(i)} className="flex-1 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300">Edit</button>
-                      <button onClick={() => onDelete(i)} className="flex-1 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Delete</button>
-                    </div>
-                  )}
+              <div className="p-8 text-center">
+                <div className="w-8 h-8 border-3 border-gray-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
+                <p className="text-gray-600">Loading indicators...</p>
+              </div>
+            ) : paged.length === 0 ? (
+              <div className="p-8 text-center">
+                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Search className="w-6 h-6 text-gray-400" />
                 </div>
-              ))
+                <p className="text-gray-600 font-medium">No indicators found</p>
+                <p className="text-gray-500 text-sm mt-1">Try adjusting your search or filters</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-200">
+                {paged.map((i) => (
+                  <div key={i.id} className="p-4 hover:bg-gray-50 transition-colors duration-150">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 mb-2">
+                          #{i.id}
+                        </span>
+                        <h4 className="font-medium text-gray-900">{i.name}</h4>
+                        {i.description && (
+                          <p className="text-sm text-gray-600 mt-1 line-clamp-2">{i.description}</p>
+                        )}
+                      </div>
+                      {i.unit && (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                          {i.unit}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Building className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                        <span className="text-gray-700">{i.department?.name}</span>
+                      </div>
+                      {i.department?.sector?.name && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-gray-600">Sector:</span>
+                          <span className="text-gray-700">{i.department.sector.name}</span>
+                        </div>
+                      )}
+                      {i.groups && i.groups.length > 0 && (
+                        <div>
+                          <span className="text-gray-600 mr-2">Groups:</span>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {i.groups.map((g) => (
+                              <span
+                                key={g.id}
+                                className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-green-100 text-green-800"
+                              >
+                                {g.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {isSuperuser && (
+                      <div className="flex gap-2 mt-4 pt-3 border-t border-gray-200">
+                        <button
+                          onClick={() => onEdit(i)}
+                          className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors duration-200"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => onDelete(i)}
+                          className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors duration-200"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
-
         </div>
+
+        {/* Pagination */}
+        {filteredIndicators.length > 0 && totalPages > 1 && (
+          <div className="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="text-sm text-gray-600">
+              Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, filteredIndicators.length)} of{' '}
+              {filteredIndicators.length} indicators
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border transition-all duration-200 ${
+                  page === 1
+                    ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400'
+                }`}
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Previous
+              </button>
+              
+              <div className="flex items-center gap-1">
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (page <= 3) {
+                    pageNum = i + 1;
+                  } else if (page >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = page - 2 + i;
+                  }
+                  
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setPage(pageNum)}
+                      className={`w-10 h-10 rounded-lg transition-all duration-200 ${
+                        page === pageNum
+                          ? 'bg-blue-600 text-white shadow-md'
+                          : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+              </div>
+              
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border transition-all duration-200 ${
+                  page === totalPages
+                    ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400'
+                }`}
+              >
+                Next
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import AnnualPlan, QuarterlyBreakdown, QuarterlyPerformance, FileAttachment, SubmissionWindow
+from .models import AnnualPlan, QuarterlyBreakdown, QuarterlyPerformance, FileAttachment, SubmissionWindow, AdvisorComment
 
 
 class AnnualPlanSerializer(serializers.ModelSerializer):
@@ -9,15 +9,26 @@ class AnnualPlanSerializer(serializers.ModelSerializer):
     sector_id = serializers.IntegerField(source='indicator.department.sector.id', read_only=True)
     sector_name = serializers.CharField(source='indicator.department.sector.name', read_only=True)
     indicator_unit = serializers.CharField(source='indicator.unit', read_only=True)
+    indicator_group_id = serializers.SerializerMethodField()
+    indicator_group_name = serializers.SerializerMethodField()
 
     class Meta:
         model = AnnualPlan
         fields = [
             'id', 'year', 'indicator', 'indicator_name', 'indicator_unit',
+            'indicator_group_id', 'indicator_group_name',
             'department_id', 'department_name', 'sector_id', 'sector_name',
             'target', 'created_by', 'created_at'
         ]
         read_only_fields = ['created_by', 'created_at']
+
+    def get_indicator_group_id(self, obj):
+        group = obj.indicator.groups.first()
+        return group.id if group else None
+
+    def get_indicator_group_name(self, obj):
+        group = obj.indicator.groups.first()
+        return group.name if group else None
 
 
 class QuarterlyBreakdownSerializer(serializers.ModelSerializer):
@@ -68,3 +79,14 @@ class SubmissionWindowSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'window_type', 'year', 'always_open', 'start', 'end', 'active'
         ]
+
+
+class AdvisorCommentSerializer(serializers.ModelSerializer):
+    author_username = serializers.CharField(source='author.username', read_only=True)
+
+    class Meta:
+        model = AdvisorComment
+        fields = [
+            'id', 'author', 'author_username', 'year', 'sector', 'department', 'comment', 'created_at'
+        ]
+        read_only_fields = ['author', 'created_at']

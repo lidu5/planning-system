@@ -1,7 +1,9 @@
 from django.shortcuts import render
 from rest_framework import viewsets, permissions
-from .models import StateMinisterSector, Department, Indicator
-from .serializers import StateMinisterSectorSerializer, DepartmentSerializer, IndicatorSerializer
+from .models import StateMinisterSector, Department, Indicator, IndicatorGroup
+from .serializers import StateMinisterSectorSerializer, DepartmentSerializer, IndicatorSerializer, IndicatorGroupSerializer
+from rest_framework.response import Response
+from rest_framework import status
 
 class SuperuserWritePermission(permissions.BasePermission):
     def has_permission(self, request, view):
@@ -36,6 +38,40 @@ class SectorViewSet(viewsets.ModelViewSet):
                 if sector_id2:
                     qs = qs.filter(id=sector_id2)
         return qs
+
+class IndicatorGroupViewSet(viewsets.ModelViewSet):
+    queryset = IndicatorGroup.objects.select_related('department', 'department__sector').all().order_by('name')
+    serializer_class = IndicatorGroupSerializer
+    permission_classes = [SuperuserWritePermission]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        department_id = self.request.query_params.get('department')
+        if department_id:
+            qs = qs.filter(department_id=department_id)
+        if getattr(user, 'is_superuser', False):
+            return qs
+        role = getattr(user, 'role', '').upper()
+        if role == 'STATE_MINISTER':
+            s_id = getattr(getattr(user, 'sector', None), 'id', None) or getattr(user, 'sector', None)
+            if s_id:
+                qs = qs.filter(department__sector_id=s_id)
+        elif role == 'ADVISOR':
+            d_id = getattr(getattr(user, 'department', None), 'id', None) or getattr(user, 'department', None)
+            if d_id:
+                qs = qs.filter(department_id=d_id)
+            else:
+                s_id = getattr(getattr(user, 'sector', None), 'id', None) or getattr(user, 'sector', None)
+                if s_id:
+                    qs = qs.filter(department__sector_id=s_id)
+        return qs
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.indicators.exists():
+            return Response({'detail': 'Cannot delete an indicator group that has associated indicators. Remove or reassign them first.'}, status=status.HTTP_400_BAD_REQUEST)
+        return super().destroy(request, *args, **kwargs)
 
 class DepartmentViewSet(viewsets.ModelViewSet):
     queryset = Department.objects.select_related('sector').all().order_by('name')
@@ -76,6 +112,12 @@ class IndicatorViewSet(viewsets.ModelViewSet):
         department_id = self.request.query_params.get('department')
         if department_id:
             qs = qs.filter(department_id=department_id)
+        group_id = self.request.query_params.get('group')
+        if group_id:
+            if group_id.lower() == 'null':
+                qs = qs.filter(groups__isnull=True)
+            else:
+                qs = qs.filter(groups__id=group_id)
         if getattr(user, 'is_superuser', False):
             return qs
         role = getattr(user, 'role', '').upper()

@@ -99,6 +99,19 @@ class FileAttachment(models.Model):
     description = models.CharField(max_length=255, blank=True)
 
 
+class AdvisorComment(models.Model):
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='advisor_comments')
+    year = models.PositiveIntegerField(null=True, blank=True)
+    sector = models.ForeignKey('indicators.StateMinisterSector', on_delete=models.SET_NULL, null=True, blank=True, related_name='advisor_comments')
+    department = models.ForeignKey('indicators.Department', on_delete=models.SET_NULL, null=True, blank=True, related_name='advisor_comments')
+    comment = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        y = self.year or 'ALL'
+        return f"AdvisorComment by {getattr(self.author, 'username', 'unknown')} ({y})"
+
+
 class SubmissionWindow(models.Model):
     class WindowType(models.TextChoices):
         BREAKDOWN = 'BREAKDOWN', 'Annual Breakdown'

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { toUserMessage } from './error';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
@@ -12,5 +13,19 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    try {
+      const mapped = toUserMessage(error);
+      // attach for consumers
+      (error as any).userMessage = mapped.userMessage;
+    } catch (_) {
+      // no-op
+    }
+    return Promise.reject(error);
+  }
+);
 
 export default api;
