@@ -184,8 +184,8 @@ export default function DashboardLayout({ children }: PropsWithChildren) {
       { label: 'Advisor Comments', to: '/advisor-comments' },
     ];
     const ministerMenus = [
-      { label: 'Quarterly Breakdown', to: '/quarterly-breakdowns' },
-      { label: 'Quarterly Performance', to: '/performances' },
+      // { label: 'Quarterly Breakdown', to: '/quarterly-breakdowns' },
+      // { label: 'Quarterly Performance', to: '/performances' },
       { label: 'Reviews & Approvals', to: '/reviews' },
       { label: 'Advisor Comments', to: '/advisor-comments' },
     ];
@@ -227,7 +227,7 @@ export default function DashboardLayout({ children }: PropsWithChildren) {
       <aside
         className={`${
           collapsed ? 'w-20' : 'w-64'
-        } hidden md:flex flex-col bg-gradient-to-b from-green-900 to-emerald-900 text-white shadow-lg transition-all duration-300 ease-in-out`}
+        } hidden md:flex flex-col bg-[#1d8d51] text-white shadow-lg transition-all duration-300 ease-in-out`}
       >
         {/* Sidebar Header */}
         <div className="h-20 px-4 flex items-center justify-center border-b border-white/10">
@@ -359,7 +359,7 @@ export default function DashboardLayout({ children }: PropsWithChildren) {
                   <p className="text-sm font-medium text-gray-900">{user?.username}</p>
                   <p className="text-xs text-gray-500">{role}</p>
                 </div>
-                <div className="h-8 w-8 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 flex items-center justify-center text-white text-sm font-semibold">
+                <div className="h-8 w-8 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center text-white text-sm font-semibold">
                   {user?.username?.charAt(0).toUpperCase()}
                 </div>
               </div>
@@ -385,7 +385,7 @@ export default function DashboardLayout({ children }: PropsWithChildren) {
         </main>
 
         {/* Footer */}
-        <footer className="bg-white border-t border-gray-200 py-4 px-6">
+        <footer className="bg-blue border-t border-gray-200 py-4 px-6" >
           <div className="flex flex-col md:flex-row items-center justify-between text-sm text-gray-500">
             <p>© {new Date().getFullYear()} Ministry of Agriculture. All rights reserved.</p>
             <div className="flex items-center gap-4 mt-2 md:mt-0">

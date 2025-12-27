@@ -51,6 +51,7 @@ type Performance = {
   quarter: number;
   value: string;
   status: string;
+  variance_description?: string;
 };
 
 export default function Reviews() {
@@ -62,11 +63,25 @@ export default function Reviews() {
   const [perfs, setPerfs] = useState<Performance[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [deptFilter, setDeptFilter] = useState<number | 'ALL'>('ALL');
   const [showFilters, setShowFilters] = useState(false);
   const [expandedView, setExpandedView] = useState<'breakdowns' | 'performance' | null>(null);
+  const [editBreakdown, setEditBreakdown] = useState<{
+    open: boolean;
+    item: Breakdown | null;
+    q1: string;
+    q2: string;
+    q3: string;
+    q4: string;
+  }>({ open: false, item: null, q1: '', q2: '', q3: '', q4: '' });
+  const [editPerf, setEditPerf] = useState<{
+    open: boolean;
+    item: Performance | null;
+    value: string;
+  }>({ open: false, item: null, value: '' });
 
   const isMinister = (user?.role || '').toUpperCase() === 'STATE_MINISTER';
 
@@ -169,6 +184,55 @@ export default function Reviews() {
     };
   }, [filteredBreakdowns, filteredPerfs, breakdowns, perfs]);
 
+  const openEditBreakdown = (b: Breakdown) => {
+    setEditBreakdown({
+      open: true,
+      item: b,
+      q1: b.q1 ?? '',
+      q2: b.q2 ?? '',
+      q3: b.q3 ?? '',
+      q4: b.q4 ?? '',
+    });
+  };
+
+  const saveEditBreakdown = async () => {
+    if (!editBreakdown.item) return;
+    try {
+      await api.put(`/api/breakdowns/${editBreakdown.item.id}/`, {
+        plan: editBreakdown.item.plan,
+        q1: editBreakdown.q1,
+        q2: editBreakdown.q2,
+        q3: editBreakdown.q3,
+        q4: editBreakdown.q4,
+        status: editBreakdown.item.status,
+      });
+      setEditBreakdown({ open: false, item: null, q1: '', q2: '', q3: '', q4: '' });
+      await loadData(true);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || 'Update failed');
+    }
+  };
+
+  const openEditPerf = (p: Performance) => {
+    setEditPerf({ open: true, item: p, value: p.value });
+  };
+
+  const saveEditPerf = async () => {
+    if (!editPerf.item) return;
+    try {
+      await api.put(`/api/performances/${editPerf.item.id}/`, {
+        plan: editPerf.item.plan,
+        quarter: editPerf.item.quarter,
+        value: editPerf.value,
+        status: editPerf.item.status,
+      });
+      setEditPerf({ open: false, item: null, value: '' });
+      await loadData(true);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || 'Update failed');
+    }
+  };
+
   const approveBreakdown = async (b: Breakdown) => {
     if (!confirm(`Approve quarterly breakdown for this indicator?`)) return;
     try {
@@ -224,6 +288,49 @@ export default function Reviews() {
   };
 
   const hasActiveFilters = year !== thisYearEC || query || deptFilter !== 'ALL';
+
+  const submitValidatedToStrategic = async () => {
+    if (!isMinister) return;
+
+    const approvedBreakdowns = breakdowns.filter(
+      (b) => (b.status || '').toUpperCase() === 'APPROVED'
+    );
+    const approvedPerfs = perfs.filter(
+      (p) => (p.status || '').toUpperCase() === 'APPROVED'
+    );
+
+    if (approvedBreakdowns.length === 0 && approvedPerfs.length === 0) {
+      alert('There are no approved items to submit to Strategic Affairs Staff.');
+      return;
+    }
+
+    if (
+      !confirm(
+        `This will send all approved indicators (${approvedBreakdowns.length} breakdowns and ${approvedPerfs.length} performance reports) to Strategic Affairs Staff. Do you want to continue?`
+      )
+    ) {
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      await api.post('/api/reviews/submit-to-strategic/', {
+        breakdown_ids: approvedBreakdowns.map((b) => b.id),
+        performance_ids: approvedPerfs.map((p) => p.id),
+      });
+
+      await loadData(true);
+      alert('Approved indicators have been submitted to Strategic Affairs Staff.');
+    } catch (e: any) {
+      setError(
+        e?.response?.data?.detail || 'Failed to submit approved indicators to Strategic Affairs Staff'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 md:p-6">
@@ -502,7 +609,7 @@ export default function Reviews() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Quarterly Breakdowns Card */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-blue-100">
+            <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-emerald-50 to-green-100">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-blue-100 rounded-lg">
@@ -623,6 +730,15 @@ export default function Reviews() {
                                 <XCircle className="w-4 h-4" />
                                 Reject
                               </button>
+                              {isMinister && (
+                                <button
+                                  onClick={() => openEditBreakdown(b)}
+                                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                  Edit
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -682,6 +798,7 @@ export default function Reviews() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Indicator</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quarter</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reported Value</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Variance Explanation</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                     </tr>
                   </thead>
@@ -735,6 +852,13 @@ export default function Reviews() {
                             </div>
                           </td>
                           <td className="px-6 py-4">
+                            <div className="text-sm text-gray-700 whitespace-pre-line max-w-xs">
+                              {pr.variance_description && pr.variance_description.trim()
+                                ? pr.variance_description
+                                : '—'}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
                             <div className="flex gap-2">
                               <button
                                 onClick={() => approvePerf(pr)}
@@ -772,19 +896,113 @@ export default function Reviews() {
           </div>
         </div>
 
+        {/* Edit Breakdown Modal */}
+        {isMinister && editBreakdown.open && editBreakdown.item && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+              <h2 className="text-lg font-semibold text-gray-900">Edit Quarterly Plan</h2>
+              <div className="grid grid-cols-4 gap-3">
+                {[{ label: 'Q1', key: 'q1' }, { label: 'Q2', key: 'q2' }, { label: 'Q3', key: 'q3' }, { label: 'Q4', key: 'q4' }].map(({ label, key }) => (
+                  <div key={key}>
+                    <div className="text-xs text-gray-500 mb-1">{label}</div>
+                    <input
+                      type="number"
+                      className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm"
+                      value={(editBreakdown as any)[key]}
+                      onChange={(e) =>
+                        setEditBreakdown((prev) => ({
+                          ...prev,
+                          [key]: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setEditBreakdown({ open: false, item: null, q1: '', q2: '', q3: '', q4: '' })}
+                  className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveEditBreakdown}
+                  className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Performance Modal */}
+        {isMinister && editPerf.open && editPerf.item && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+              <h2 className="text-lg font-semibold text-gray-900">Edit Quarterly Performance</h2>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Reported Value</label>
+                <input
+                  type="number"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  value={editPerf.value}
+                  onChange={(e) => setEditPerf((prev) => ({ ...prev, value: e.target.value }))}
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() => setEditPerf({ open: false, item: null, value: '' })}
+                  className="px-4 py-2 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveEditPerf}
+                  className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Quick Stats Footer */}
         <div className="mt-6 p-6 bg-white rounded-2xl border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="text-sm text-gray-600">
               Showing {filteredBreakdowns.length + filteredPerfs.length} pending items
               {hasActiveFilters && ' (filtered)'}
             </div>
-            <div className="text-sm text-gray-600">
+            <div className="flex flex-col md:flex-row items-start md:items-center gap-3">
               {!isMinister && (
-                <div className="flex items-center gap-2 text-amber-600">
+                <div className="flex items-center gap-2 text-amber-600 text-sm">
                   <AlertCircle className="w-4 h-4" />
-                  Only State Ministers can approve submissions
+                  Only State Ministers can approve and submit to Strategic Affairs Staff
                 </div>
+              )}
+              {isMinister && (
+                <button
+                  type="button"
+                  onClick={submitValidatedToStrategic}
+                  disabled={
+                    submitting ||
+                    (!breakdowns.some((b) => (b.status || '').toUpperCase() === 'APPROVED') &&
+                      !perfs.some((p) => (p.status || '').toUpperCase() === 'APPROVED'))
+                  }
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors duration-200 ${
+                    submitting ||
+                    (!breakdowns.some((b) => (b.status || '').toUpperCase() === 'APPROVED') &&
+                      !perfs.some((p) => (p.status || '').toUpperCase() === 'APPROVED'))
+                      ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                      : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  }`}
+                >
+                  <Target className="w-4 h-4" />
+                  {submitting ? 'Submitting to Strategic Affairs...' : 'Submit validated to Strategic Affairs'}
+                </button>
               )}
             </div>
           </div>

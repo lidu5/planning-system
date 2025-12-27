@@ -55,6 +55,7 @@ type Performance = {
   quarter: number;
   value: string;
   status: string;
+  variance_description?: string;
 };
 
 export default function Validations() {
@@ -765,6 +766,7 @@ export default function Validations() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Indicator</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quarter</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reported Value</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Variance Explanation</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Validation</th>
                     </tr>
                   </thead>
@@ -819,6 +821,13 @@ export default function Validations() {
                                   {achievementRate.toFixed(1)}% of target
                                 </div>
                               )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="text-sm text-gray-700 whitespace-pre-line max-w-xs" title={pr.variance_description}>
+                              {pr.variance_description && pr.variance_description.trim()
+                                ? pr.variance_description
+                                : '—'}
                             </div>
                           </td>
                           <td className="px-6 py-4">

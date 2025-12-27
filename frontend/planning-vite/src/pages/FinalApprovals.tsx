@@ -44,6 +44,7 @@ type Performance = {
   quarter: number;
   value: string;
   status: string;
+  variance_description?: string; // Add variance_description property
 };
 
 export default function FinalApprovals() {
@@ -624,6 +625,14 @@ export default function FinalApprovals() {
                                 </div>
                               )}
                             </div>
+                            {pr.variance_description && pr.variance_description.trim() && (
+                              <div className="mt-3 text-sm text-gray-700 bg-amber-50 border border-amber-200 rounded-lg p-3 whitespace-pre-line">
+                                <div className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-1">
+                                  Variance Explanation
+                                </div>
+                                {pr.variance_description}
+                              </div>
+                            )}
                           </div>
                         </div>
                         

@@ -48,6 +48,7 @@ class QuarterlyBreakdown(models.Model):
     validated_at = models.DateTimeField(null=True, blank=True)
     final_approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='final_approved_breakdowns')
     final_approved_at = models.DateTimeField(null=True, blank=True)
+    sent_to_strategic = models.BooleanField(default=False)
 
     def clean(self):
         total = (self.q1 or 0) + (self.q2 or 0) + (self.q3 or 0) + (self.q4 or 0)
@@ -77,11 +78,13 @@ class QuarterlyPerformance(models.Model):
     submitted_at = models.DateTimeField(null=True, blank=True)
     reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='reviewed_performances')
     review_comment = models.TextField(blank=True)
+    variance_description = models.TextField(blank=True)
     reviewed_at = models.DateTimeField(null=True, blank=True)
     validated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='validated_performances')
     validated_at = models.DateTimeField(null=True, blank=True)
     final_approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='final_approved_performances')
     final_approved_at = models.DateTimeField(null=True, blank=True)
+    sent_to_strategic = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ('plan', 'quarter')

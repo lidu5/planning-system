@@ -57,6 +57,7 @@ export default function QuarterlyBreakdowns() {
   const [query, setQuery] = useState<string>('');
   const [expandedSectors, setExpandedSectors] = useState<Set<string>>(new Set());
   const [expandedDepartments, setExpandedDepartments] = useState<Set<string>>(new Set());
+  const [planWindowOpen, setPlanWindowOpen] = useState<boolean>(true);
 
   const [planModal, setPlanModal] = useState<{ open: boolean; planId: number | null; quarter: 1|2|3|4 | null; value: string; indicatorName: string }>(() => ({ open: false, planId: null, quarter: null, value: '', indicatorName: '' }));
   const [perfModal, setPerfModal] = useState<{ open: boolean; planId: number | null; quarter: 1|2|3|4 | null; value: string; indicatorName: string }>(() => ({ open: false, planId: null, quarter: null, value: '', indicatorName: '' }));
@@ -238,8 +239,15 @@ export default function QuarterlyBreakdowns() {
       setSuccess('Quarterly plan saved successfully');
       setTimeout(() => setSuccess(null), 3000);
     } catch (e: any) {
-      const msg = e?.userMessage || getErrorMessage(e, 'Save failed');
-      setError(msg);
+      const rawMsg = e?.userMessage || getErrorMessage(e, 'Save failed');
+      const detail = e?.response?.data?.detail || rawMsg;
+      const text = typeof detail === 'string' ? detail : String(detail || rawMsg || '');
+      if (text.toLowerCase().includes('entry window closed')) {
+        setPlanWindowOpen(false);
+        setError('Entry window is closed. Quarterly plan is now read-only.');
+      } else {
+        setError(text);
+      }
     }
   };
 
@@ -251,8 +259,15 @@ export default function QuarterlyBreakdowns() {
       setSuccess('Quarterly plan submitted for review');
       setTimeout(() => setSuccess(null), 3000);
     } catch (e: any) {
-      const msg = e?.userMessage || getErrorMessage(e, 'Submit failed');
-      setError(msg);
+      const rawMsg = e?.userMessage || getErrorMessage(e, 'Submit failed');
+      const detail = e?.response?.data?.detail || rawMsg;
+      const text = typeof detail === 'string' ? detail : String(detail || rawMsg || '');
+      if (text.toLowerCase().includes('entry window closed')) {
+        setPlanWindowOpen(false);
+        setError('Entry window is closed. Quarterly plan is now read-only.');
+      } else {
+        setError(text);
+      }
     }
   };
 
@@ -312,6 +327,7 @@ export default function QuarterlyBreakdowns() {
 
   const canEditPlan = (planId?: number): boolean => {
     const role = (user?.role || '').toUpperCase();
+    if (!planWindowOpen) return false;
     if (role !== 'LEAD_EXECUTIVE_BODY') return false;
     if (!planId) return true;
     const st = (breakdowns[planId]?.status || 'DRAFT').toUpperCase();
@@ -320,6 +336,7 @@ export default function QuarterlyBreakdowns() {
 
   const canSubmitPlan = (planId?: number): boolean => {
     const role = (user?.role || '').toUpperCase();
+    if (!planWindowOpen) return false;
     if (role !== 'LEAD_EXECUTIVE_BODY') return false;
     if (!planId) return true;
     const st = (breakdowns[planId]?.status || 'DRAFT').toUpperCase();

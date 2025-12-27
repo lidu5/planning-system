@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.utils import timezone
 from rest_framework import viewsets, permissions, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from decimal import Decimal
 from .models import (
@@ -52,6 +52,7 @@ class AnnualPlanViewSet(viewsets.ModelViewSet):
         # Superuser and Strategic Staff see all (unless department assigned)
         if getattr(user, 'is_superuser', False):
             return qs
+
         role = getattr(user, 'role', '').upper()
         if role == 'STRATEGIC_STAFF':
             dept_id = getattr(getattr(user, 'department', None), 'id', None) or getattr(user, 'department', None)
@@ -82,6 +83,46 @@ class AnnualPlanViewSet(viewsets.ModelViewSet):
         return qs
 
 
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def submit_to_strategic(request):
+    """Batch endpoint used by State Minister to send approved items to Strategic Affairs Staff.
+
+    Frontend (Reviews.tsx) calls this with:
+      {
+        "breakdown_ids": [1, 2, ...],
+        "performance_ids": [10, 11, ...]
+      }
+
+    Only items with status=APPROVED are marked as sent_to_strategic.
+    """
+    role = getattr(request.user, 'role', '').upper()
+    if role != 'STATE_MINISTER':
+        return Response({'detail': 'Only State Minister can submit to Strategic Affairs Staff.'}, status=status.HTTP_403_FORBIDDEN)
+
+    breakdown_ids = request.data.get('breakdown_ids') or []
+    performance_ids = request.data.get('performance_ids') or []
+
+    if not isinstance(breakdown_ids, list) or not isinstance(performance_ids, list):
+        return Response({'detail': 'Invalid payload. Expected lists of IDs.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Update only APPROVED items so flow is: SUBMITTED -> APPROVED (State Minister) -> sent_to_strategic=True -> VALIDATED (Strategic)
+    bqs = QuarterlyBreakdown.objects.filter(id__in=breakdown_ids, status=PlanStatus.APPROVED)
+    pqs = QuarterlyPerformance.objects.filter(id__in=performance_ids, status=PerformanceStatus.APPROVED)
+
+    updated_breakdowns = bqs.update(sent_to_strategic=True)
+    updated_perfs = pqs.update(sent_to_strategic=True)
+
+    return Response(
+        {
+            'detail': 'Approved items submitted to Strategic Affairs Staff.',
+            'breakdowns_sent': updated_breakdowns,
+            'performances_sent': updated_perfs,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
 class QuarterlyBreakdownViewSet(viewsets.ModelViewSet):
     queryset = QuarterlyBreakdown.objects.select_related('plan', 'plan__indicator').all()
     serializer_class = QuarterlyBreakdownSerializer
@@ -90,11 +131,13 @@ class QuarterlyBreakdownViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
-        # Superusers and Strategic Staff see all
+        # Superusers see all
         if getattr(user, 'is_superuser', False):
             return qs
         role = getattr(user, 'role', '').upper()
         if role == 'STRATEGIC_STAFF':
+            # Strategic Affairs Staff should only see items explicitly sent to them
+            qs = qs.filter(sent_to_strategic=True)
             # If user is tied to a department, restrict to that department
             dept_id = getattr(getattr(user, 'department', None), 'id', None) or getattr(user, 'department', None)
             if dept_id:
@@ -131,9 +174,11 @@ class QuarterlyBreakdownViewSet(viewsets.ModelViewSet):
 
     def _allow_plan_edit(self, request):
         role = getattr(request.user, 'role', '')
-        # Only Lead Executive Body encodes (creates/updates) quarterly breakdowns.
-        # Advisors and others act as reviewers and cannot modify the record itself.
-        if role not in ['LEAD_EXECUTIVE_BODY']:
+        # Lead Executive Body encodes (creates/updates) quarterly breakdowns.
+        # State Minister is also allowed to make edits on submitted/rejected plans
+        # that fall under their sector/department, while Advisors and others act
+        # as reviewers and cannot modify the record itself.
+        if role not in ['LEAD_EXECUTIVE_BODY', 'STATE_MINISTER']:
             return False
         return True
 
@@ -153,6 +198,10 @@ class QuarterlyBreakdownViewSet(viewsets.ModelViewSet):
             user_dept = getattr(getattr(request.user, 'department', None), 'id', None) or getattr(request.user, 'department', None)
             if user_dept and getattr(plan.indicator.department, 'id', plan.indicator.department) != user_dept:
                 return Response({'detail': 'You can only create breakdowns for your assigned department.'}, status=status.HTTP_403_FORBIDDEN)
+        # Also enforce annual breakdown submission window on create
+        now = timezone.now()
+        if not within_annual_breakdown_window(now):
+            return Response({'detail': 'Entry window closed for annual breakdown.'}, status=status.HTTP_400_BAD_REQUEST)
         return super().create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
@@ -163,6 +212,10 @@ class QuarterlyBreakdownViewSet(viewsets.ModelViewSet):
         user_dept = getattr(getattr(request.user, 'department', None), 'id', None) or getattr(request.user, 'department', None)
         if user_dept and getattr(obj.plan.indicator.department, 'id', obj.plan.indicator.department) != user_dept:
             return Response({'detail': 'You can only update breakdowns for your assigned department.'}, status=status.HTTP_403_FORBIDDEN)
+        # Enforce annual breakdown submission window on update as well
+        now = timezone.now()
+        if not within_annual_breakdown_window(now):
+            return Response({'detail': 'Entry window closed for annual breakdown.'}, status=status.HTTP_400_BAD_REQUEST)
         return super().update(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'])
@@ -306,6 +359,8 @@ class QuarterlyPerformanceViewSet(viewsets.ModelViewSet):
             return qs
         role = getattr(user, 'role', '').upper()
         if role == 'STRATEGIC_STAFF':
+            # Strategic Affairs Staff should only see items explicitly sent to them
+            qs = qs.filter(sent_to_strategic=True)
             # Restrict to user's department if assigned
             dept_id = getattr(getattr(user, 'department', None), 'id', None) or getattr(user, 'department', None)
             if dept_id:
@@ -347,13 +402,13 @@ class QuarterlyPerformanceViewSet(viewsets.ModelViewSet):
     def _allow_perf_edit(self, request, plan):
         # Nobody can edit quarterly performance until the related quarterly breakdown
         # has reached at least State Minister approval, and only Lead Executive Body
-        # can encode (create/update) the performance values.
+        # and State Minister can encode (create/update) the performance values.
         bd = QuarterlyBreakdown.objects.filter(plan=plan).first()
         if not bd or bd.status not in [PlanStatus.APPROVED, PlanStatus.VALIDATED, PlanStatus.FINAL_APPROVED]:
             return False
 
         role = getattr(request.user, 'role', '')
-        if role not in ['LEAD_EXECUTIVE_BODY']:
+        if role not in ['LEAD_EXECUTIVE_BODY', 'STATE_MINISTER']:
             return False
         # Department scope enforcement
         user_dept = getattr(getattr(request.user, 'department', None), 'id', None) or getattr(request.user, 'department', None)
@@ -369,16 +424,33 @@ class QuarterlyPerformanceViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Invalid plan.'}, status=status.HTTP_400_BAD_REQUEST)
         if not self._allow_perf_edit(request, plan):
             return Response({'detail': 'Only Lead Executive Body can create performance for an approved quarterly plan.'}, status=status.HTTP_403_FORBIDDEN)
+        # Enforce quarter submission window on create
+        try:
+            quarter = int(request.data.get('quarter'))
+        except (TypeError, ValueError):
+            quarter = None
+        if quarter is not None:
+            now = timezone.now()
+            if not within_quarter_submission_window(now, quarter):
+                return Response({'detail': 'Entry window closed for this quarter performance.'}, status=status.HTTP_400_BAD_REQUEST)
         return super().create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
         obj = self.get_object()
         # Do not allow any edits after the performance has been approved/validated/final approved.
-        if obj.status not in [PerformanceStatus.DRAFT, PerformanceStatus.REJECTED]:
+        # State Minister, however, is allowed to make corrections on SUBMITTED items
+        # during the review stage.
+        if obj.status not in [PerformanceStatus.DRAFT, PerformanceStatus.REJECTED, PerformanceStatus.SUBMITTED]:
             return Response({'detail': 'Performance cannot be edited after approval/validation. Please request a rejection to make changes.'}, status=status.HTTP_400_BAD_REQUEST)
+        if obj.status == PerformanceStatus.SUBMITTED and getattr(request.user, 'role', '') != 'STATE_MINISTER':
+            return Response({'detail': 'Only State Minister can edit submitted performance.'}, status=status.HTTP_403_FORBIDDEN)
 
         if not self._allow_perf_edit(request, obj.plan):
             return Response({'detail': 'Only Lead Executive Body can update performance for an approved quarterly plan.'}, status=status.HTTP_403_FORBIDDEN)
+        # Enforce quarter submission window on update
+        now = timezone.now()
+        if not within_quarter_submission_window(now, obj.quarter):
+            return Response({'detail': 'Entry window closed for this quarter performance.'}, status=status.HTTP_400_BAD_REQUEST)
         return super().update(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'])
@@ -400,6 +472,28 @@ class QuarterlyPerformanceViewSet(viewsets.ModelViewSet):
         bd = QuarterlyBreakdown.objects.filter(plan=obj.plan).first()
         if not bd or bd.status not in [PlanStatus.APPROVED, PlanStatus.VALIDATED, PlanStatus.FINAL_APPROVED]:
             return Response({'detail': 'Quarterly performance cannot be submitted until the corresponding quarterly breakdown plan is approved by the State Minister.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # When the quarter performance is <84% or >110% of the quarterly target,
+        # require the submitting Lead Executive Body to provide a description.
+        q_target = None
+        if obj.quarter == 1:
+            q_target = bd.q1 or 0
+        elif obj.quarter == 2:
+            q_target = bd.q2 or 0
+        elif obj.quarter == 3:
+            q_target = bd.q3 or 0
+        elif obj.quarter == 4:
+            q_target = bd.q4 or 0
+
+        # Only perform the check when the quarterly target is positive.
+        from decimal import Decimal
+        if q_target and Decimal(q_target) > 0:
+            perf_pct = (Decimal(obj.value) / Decimal(q_target)) * Decimal('100')
+            if perf_pct < Decimal('84') or perf_pct > Decimal('110'):
+                variance_description = (request.data.get('variance_description') or '').strip()
+                if not variance_description:
+                    return Response({'detail': 'Variance description is required when quarterly performance is less than 84% or greater than 110% of the target.'}, status=status.HTTP_400_BAD_REQUEST)
+                obj.variance_description = variance_description
 
         # Set status to SUBMITTED (goes directly to State Minister)
         # Advisors can still view and comment, but their verification is not required

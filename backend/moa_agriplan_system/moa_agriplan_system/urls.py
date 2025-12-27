@@ -29,6 +29,7 @@ from plans.views import (
     FileAttachmentViewSet,
     SubmissionWindowViewSet,
     AdvisorCommentViewSet,
+    submit_to_strategic,
 )
 
 router = DefaultRouter()
@@ -56,6 +57,7 @@ urlpatterns = [
     path('api/minister-dashboard/', MinisterDashboardView.as_view(), name='api-minister-dashboard'),
     path('api/indicator-performance/', IndicatorPerformanceView.as_view(), name='api-indicator-performance'),
     path('api/indicator-detail/', IndicatorDetailView.as_view(), name='api-indicator-detail'),
+    path('api/reviews/submit-to-strategic/', submit_to_strategic, name='api-submit-to-strategic'),
     path('', include(router.urls)),
 ]
 

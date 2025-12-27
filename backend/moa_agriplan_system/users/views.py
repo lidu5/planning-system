@@ -277,8 +277,18 @@ class IsMinisterView(permissions.BasePermission):
         return role == 'MINISTER_VIEW'
 
 
+class IsIndicatorDashboardViewer(permissions.BasePermission):
+    """Allow State Minister, Advisor, Strategic Affairs Staff, Executive, and Minister View to access indicator dashboard."""
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        role = getattr(user, 'role', '').upper()
+        return role in ['STATE_MINISTER', 'ADVISOR', 'STRATEGIC_STAFF', 'EXECUTIVE', 'MINISTER_VIEW']
+
+
 class MinisterDashboardView(APIView):
-    permission_classes = [IsAuthenticated, IsMinisterView]
+    permission_classes = [IsAuthenticated, IsIndicatorDashboardViewer]
 
     def get(self, request):
         year = request.query_params.get('year')
@@ -615,7 +625,7 @@ class MinisterDashboardView(APIView):
 
 
 class IndicatorPerformanceView(APIView):
-    permission_classes = [IsAuthenticated, IsMinisterView]
+    permission_classes = [IsAuthenticated, IsIndicatorDashboardViewer]
 
     def get(self, request):
         """Returns hierarchical indicator performance data organized by sector, indicator groups, and indicators."""
@@ -767,7 +777,7 @@ class IndicatorPerformanceView(APIView):
 
 
 class IndicatorDetailView(APIView):
-    permission_classes = [IsAuthenticated, IsMinisterView]
+    permission_classes = [IsAuthenticated, IsIndicatorDashboardViewer]
 
     def get(self, request):
         """Returns yearly and quarterly performance data for a specific indicator."""
@@ -870,10 +880,21 @@ class IndicatorDetailView(APIView):
                 q_perf = perfs.filter(quarter=q).first()
                 q_achieved = float(q_perf.value) if q_perf else 0
                 
+                # Calculate performance percentage
+                q_percentage = None
+                variance_description = None
+                if q_target > 0 and q_perf:
+                    q_percentage = (q_achieved / q_target) * 100
+                    # Include variance_description if performance is < 84% or > 110%
+                    if q_percentage < 84 or q_percentage > 110:
+                        variance_description = q_perf.variance_description or None
+                
                 quarterly_data.append({
                     'quarter': f'Q{q}',
                     'target': q_target,
                     'achieved': q_achieved,
+                    'percentage': q_percentage,
+                    'variance_description': variance_description,
                 })
         except AnnualPlan.DoesNotExist:
             quarterly_data = [

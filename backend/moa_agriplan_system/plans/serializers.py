@@ -56,7 +56,7 @@ class QuarterlyPerformanceSerializer(serializers.ModelSerializer):
     class Meta:
         model = QuarterlyPerformance
         fields = [
-            'id', 'plan', 'quarter', 'value', 'status',
+            'id', 'plan', 'quarter', 'value', 'status', 'variance_description',
             'submitted_by', 'submitted_at', 'reviewed_by', 'review_comment', 'reviewed_at',
             'validated_by', 'validated_at', 'final_approved_by', 'final_approved_at'
         ]

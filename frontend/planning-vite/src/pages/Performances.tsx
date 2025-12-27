@@ -34,6 +34,7 @@ type Performance = {
   quarter: number; // 1..4
   value: string;
   status: string;
+  variance_description?: string;
   review_comment?: string;
   reviewed_by_name?: string;
   reviewed_at?: string;
@@ -55,6 +56,7 @@ export default function Performances() {
   const [query, setQuery] = useState<string>('');
   const [expandedSectors, setExpandedSectors] = useState<Set<string>>(new Set());
   const [expandedDepartments, setExpandedDepartments] = useState<Set<string>>(new Set());
+  const [perfWindowOpen, setPerfWindowOpen] = useState<boolean>(true);
 
   const [perfModal, setPerfModal] = useState<{ 
     open: boolean; 
@@ -64,6 +66,7 @@ export default function Performances() {
     indicatorName: string;
     planValue?: string;
     annualTarget: string;
+    varianceDescription: string;
   }>(() => ({ 
     open: false, 
     planId: null, 
@@ -71,7 +74,8 @@ export default function Performances() {
     value: '', 
     indicatorName: '',
     planValue: '',
-    annualTarget: ''
+    annualTarget: '',
+    varianceDescription: ''
   }));
 
   const [rejectionModal, setRejectionModal] = useState<{ 
@@ -263,6 +267,7 @@ export default function Performances() {
 
   const canEditPerformance = (planId: number, quarter?: 1|2|3|4): boolean => {
     const role = (user?.role || '').toUpperCase();
+    if (!perfWindowOpen) return false;
     if (role !== 'LEAD_EXECUTIVE_BODY') return false;
     const st = (breakdowns[planId]?.status || 'DRAFT').toUpperCase();
     if (!(st === 'APPROVED' || st === 'VALIDATED' || st === 'FINAL_APPROVED')) return false;
@@ -277,7 +282,7 @@ export default function Performances() {
 
   const canSubmitPerformance = (): boolean => {
     const role = (user?.role || '').toUpperCase();
-    return role === 'LEAD_EXECUTIVE_BODY';
+    return perfWindowOpen && role === 'LEAD_EXECUTIVE_BODY';
   };
 
   const ensurePerf = async (planId: number, quarter: 1|2|3|4, initialValue?: string) => {
@@ -306,7 +311,13 @@ export default function Performances() {
       
       await loadData();
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Save performance failed');
+      const detail = e?.response?.data?.detail || '';
+      if (typeof detail === 'string' && detail.toLowerCase().includes('entry window closed')) {
+        setPerfWindowOpen(false);
+        setError('Entry window is closed. Quarterly performance is now read-only.');
+      } else {
+        setError(detail || 'Save performance failed');
+      }
     }
   };
 
@@ -327,14 +338,22 @@ export default function Performances() {
         perf = await ensurePerf(planId, quarter);
       }
       
-      await api.post(`/api/performances/${perf.id}/submit/`);
+      await api.post(`/api/performances/${perf.id}/submit/`, {
+        variance_description: perfModal.varianceDescription || undefined,
+      });
       
       setSuccess(`Q${quarter} performance submitted for review`);
       setTimeout(() => setSuccess(null), 3000);
       
       await loadData();
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Submit performance failed');
+      const detail = e?.response?.data?.detail || '';
+      if (typeof detail === 'string' && detail.toLowerCase().includes('entry window closed')) {
+        setPerfWindowOpen(false);
+        setError('Entry window is closed. Quarterly performance is now read-only.');
+      } else {
+        setError(detail || 'Submit performance failed');
+      }
     }
   };
 
@@ -372,7 +391,8 @@ export default function Performances() {
     const plan = parseFloat(planValue || '0');
     const perf = parseFloat(perfValue || '0');
     if (plan === 0) return 0;
-    return Math.min((perf / plan) * 100, 100);
+    // Return the actual percentage (can be > 100) so the label shows real performance.
+    return (perf / plan) * 100;
   };
 
   const getPerformanceColor = (perfValue: string, planValue: string): string => {
@@ -680,7 +700,8 @@ export default function Performances() {
                       value: '', 
                       indicatorName: '',
                       planValue: '',
-                      annualTarget: ''
+                      annualTarget: '',
+                      varianceDescription: ''
                     })} 
                     className="text-white/80 hover:text-white text-xl"
                   >
@@ -719,6 +740,22 @@ export default function Performances() {
                   />
                 </div>
 
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Variance Explanation
+                  </label>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Required if the quarterly performance is less than 84% or greater than 110% of the quarterly target.
+                  </p>
+                  <textarea
+                    value={perfModal.varianceDescription}
+                    onChange={(e) => setPerfModal((m) => ({ ...m, varianceDescription: e.target.value }))}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-y"
+                    placeholder="Provide explanation when performance is significantly below or above the target"
+                  />
+                </div>
+
                 {!canEditPerformance(perfModal.planId, perfModal.quarter) && (
                   <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
                     <div className="font-medium mb-1">⚠️ Edit Restrictions</div>
@@ -743,7 +780,8 @@ export default function Performances() {
                     value: '', 
                     indicatorName: '',
                     planValue: '',
-                    annualTarget: ''
+                    annualTarget: '',
+                    varianceDescription: ''
                   })}
                   className="px-5 py-2.5 border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors"
                 >
@@ -763,7 +801,8 @@ export default function Performances() {
                       value: '', 
                       indicatorName: '',
                       planValue: '',
-                      annualTarget: ''
+                      annualTarget: '',
+                      varianceDescription: ''
                     });
                   }}
                   className={`px-5 py-2.5 rounded-xl transition-colors shadow-sm ${
@@ -788,7 +827,8 @@ export default function Performances() {
                       value: '', 
                       indicatorName: '',
                       planValue: '',
-                      annualTarget: ''
+                      annualTarget: '',
+                      varianceDescription: ''
                     });
                   }}
                   className={`px-5 py-2.5 rounded-xl transition-colors shadow-sm ${
@@ -970,7 +1010,8 @@ export default function Performances() {
                 const qValue = perfQ(q as 1|2|3|4);
                 const qPlan = planQ(q as 1|2|3|4);
                 const qStatus = perfS(q as 1|2|3|4);
-                const progress = getProgressPercentage(qPlan, qValue);
+                const progress = getProgressPercentage(qPlan, qValue); // actual percentage
+                const cappedProgress = Math.min(Math.max(progress, 0), 100); // for bar width 0–100
                 const perfColor = getPerformanceColor(qValue, qPlan);
 
                 return (
@@ -994,13 +1035,18 @@ export default function Performances() {
                       >
                         <div className="text-xs mb-1">Performance</div>
                         <div className="font-semibold">{qValue || '-'}</div>
+                        {qPlan && parseFloat(qPlan) > 0 && (
+                          <div className="mt-1 text-[11px] text-gray-700 opacity-80">
+                            {progress.toFixed(1)}% of plan
+                          </div>
+                        )}
                         
                         {/* Progress Bar */}
                         {qPlan && parseFloat(qPlan) > 0 && (
                           <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-200 overflow-hidden">
                             <div 
                               className="h-full bg-emerald-500 transition-all duration-300"
-                              style={{ width: `${progress}%` }}
+                              style={{ width: `${cappedProgress}%` }}
                             />
                           </div>
                         )}
