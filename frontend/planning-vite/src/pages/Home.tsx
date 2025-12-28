@@ -1,46 +1,21 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import AdminStatsCards from '../components/AdminStatsCards';
-import api from '../lib/api';
 import homePic from '../assets/home_pic.jpg';
 import { 
   BarChart3, 
   Target, 
   TrendingUp, 
   Users, 
-  Award, 
-  PieChart,
+  Award,
   ChevronRight,
-  Calendar,
-  Building,
-  Mail,
-  Phone,
-  Clock,
-  Shield,
   ArrowRight,
   Activity,
   CheckCircle,
-  FileText,
-  BarChart
+  Mail,
+  Phone,
+  Clock,
+  Shield
 } from 'lucide-react';
-
-// Define types for better type safety
-interface TargetBySector {
-  sector: string;
-  total: number;
-}
-
-interface IndicatorByDept {
-  department: string;
-  count: number;
-}
-
-interface MinisterKPI {
-  totalIndicators: number;
-  totalPerformance: number;
-  sectorAvgAch: number;
-  topIndicators: Array<{ id: number; name: string; value: number }>;
-}
 
 interface FeatureCard {
   icon: React.ReactNode;
@@ -51,22 +26,7 @@ interface FeatureCard {
 
 export default function Home() {
   const { user, logout } = useAuth();
-  const [targetsBySector, setTargetsBySector] = useState<TargetBySector[]>([]);
-  const [indicatorsByDept, setIndicatorsByDept] = useState<IndicatorByDept[]>([]);
-  const [loadingCharts, setLoadingCharts] = useState(false);
-  const [chartError, setChartError] = useState<string | null>(null);
   const [activeFeature, setActiveFeature] = useState(0);
-
-  // Minister KPIs state
-  const [ministerYear, setMinisterYear] = useState<number>(new Date().getFullYear());
-  const [mPlans, setMPlans] = useState<any[]>([]);
-  const [mBreakdowns, setMBreakdowns] = useState<any[]>([]);
-  const [mPerfs, setMPerfs] = useState<any[]>([]);
-  const [mLoading, setMLoading] = useState(false);
-  const [mError, setMError] = useState<string | null>(null);
-
-  // Animation states
-  const [statsVisible, setStatsVisible] = useState(false);
   const [heroLoaded, setHeroLoaded] = useState(false);
 
   // Feature cards data
@@ -103,135 +63,12 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
-    // Trigger stats animation
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            setStatsVisible(true);
-          }
-        });
-      },
-      { threshold: 0.1 }
-    );
-
-    const statsElement = document.getElementById('stats-section');
-    if (statsElement) observer.observe(statsElement);
-
-    return () => observer.disconnect();
-  }, []);
-
   const handleScrollTo = (sectionId: string) => {
     const el = document.getElementById(sectionId);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
-
-  useEffect(() => {
-    const loadCharts = async () => {
-      if (!user?.is_superuser) return;
-      setLoadingCharts(true);
-      setChartError(null);
-      try {
-        const [tRes, iRes] = await Promise.all([
-          api.get('/api/admin-stats/targets-by-sector/'),
-          api.get('/api/admin-stats/indicators-by-department/'),
-        ]);
-        setTargetsBySector(tRes.data || []);
-        setIndicatorsByDept(iRes.data || []);
-      } catch (e: any) {
-        setChartError(e?.response?.data?.detail || 'Failed to load charts');
-      } finally {
-        setLoadingCharts(false);
-      }
-    };
-    loadCharts();
-  }, [user?.is_superuser]);
-
-  // Load data for Minister KPIs
-  useEffect(() => {
-    const loadMinister = async () => {
-      if ((user?.role || '').toUpperCase() !== 'MINISTER_VIEW') return;
-      setMLoading(true);
-      setMError(null);
-      try {
-        const [plansRes, bRes, pRes] = await Promise.all([
-          api.get('/api/annual-plans/', { params: { year: ministerYear } }),
-          api.get('/api/breakdowns/'),
-          api.get('/api/performances/'),
-        ]);
-        setMPlans(plansRes.data || []);
-        setMBreakdowns((bRes.data || []).filter((b: any) => 
-          String(b.status).toUpperCase() === 'FINAL_APPROVED'
-        ));
-        setMPerfs((pRes.data || []).filter((p: any) => 
-          String(p.status).toUpperCase() === 'FINAL_APPROVED'
-        ));
-      } catch (e: any) {
-        setMError(e?.response?.data?.detail || 'Failed to load minister data');
-      } finally {
-        setMLoading(false);
-      }
-    };
-    loadMinister();
-  }, [user?.role, ministerYear]);
-
-  const mPlanById = useMemo(() => {
-    const map: Record<number, any> = {};
-    for (const p of mPlans) map[p.id] = p;
-    return map;
-  }, [mPlans]);
-
-  const ministerKpis = useMemo<MinisterKPI>(() => {
-    if (!mPlans.length) return { 
-      totalIndicators: 0, 
-      totalPerformance: 0, 
-      sectorAvgAch: 0, 
-      topIndicators: [] 
-    };
-
-    const involvedPlanIds = new Set<number>();
-    mPerfs.forEach((pr: any) => involvedPlanIds.add(pr.plan));
-    mBreakdowns.forEach((b: any) => involvedPlanIds.add(b.plan));
-    
-    const involvedIndicators = new Set<number>();
-    involvedPlanIds.forEach((pid) => { 
-      const p = mPlanById[pid]; 
-      if (p) involvedIndicators.add(p.indicator); 
-    });
-
-    const totalPerformance = mPerfs.reduce(
-      (sum: number, pr: any) => sum + (Number(pr.value) || 0), 0
-    );
-    const totalTarget = Array.from(involvedPlanIds).reduce(
-      (acc, pid) => acc + (Number(mPlanById[pid]?.target) || 0), 0
-    );
-    const sectorAvgAch = totalTarget > 0 ? (totalPerformance / totalTarget) * 100 : 0;
-
-    const perfByIndicator: Record<number, { name: string; value: number }> = {};
-    mPerfs.forEach((pr: any) => {
-      const p = mPlanById[pr.plan];
-      if (!p) return;
-      if (!perfByIndicator[p.indicator]) {
-        perfByIndicator[p.indicator] = { name: p.indicator_name, value: 0 };
-      }
-      perfByIndicator[p.indicator].value += Number(pr.value) || 0;
-    });
-
-    const topIndicators = Object.entries(perfByIndicator)
-      .map(([id, v]) => ({ id: Number(id), name: v.name, value: v.value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5);
-
-    return { 
-      totalIndicators: involvedIndicators.size, 
-      totalPerformance, 
-      sectorAvgAch, 
-      topIndicators 
-    };
-  }, [mPlans, mPerfs, mBreakdowns, mPlanById]);
 
   // Auto-rotate features
   useEffect(() => {
@@ -279,7 +116,7 @@ export default function Home() {
               <div className="text-right">
                 <p className="text-sm font-medium text-gray-900">{user?.username}</p>
                 <p className="text-xs text-gray-500">
-                  {user?.is_superuser ? 'Super Admin' : user?.role?.replace(/_/g, ' ') || 'User'}
+                  {user?.role?.replace(/_/g, ' ') || 'User'}
                 </p>
               </div>
               <button
@@ -444,313 +281,6 @@ export default function Home() {
             </div>
           </div>
         </section>
-
-        {/* Admin Stats Section */}
-        {user?.is_superuser && (
-          <section id="stats-section" className="mb-16">
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                  Dashboard <span className="text-emerald-600">Analytics</span>
-                </h2>
-                <p className="text-gray-600">Real-time insights and performance metrics</p>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Calendar className="w-5 h-5 text-gray-400" />
-                <span className="text-sm text-gray-500">FY {new Date().getFullYear()}</span>
-              </div>
-            </div>
-
-            <AdminStatsCards />
-
-            {chartError && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 mb-6">
-                {chartError}
-              </div>
-            )}
-
-            <div className={`grid grid-cols-1 lg:grid-cols-2 gap-8 transition-all duration-1000 ${
-              statsVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'
-            }`}>
-              {/* Targets by Sector */}
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-xl transition-shadow">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center">
-                    <PieChart className="w-5 h-5 text-emerald-600 mr-3" />
-                    <h3 className="text-lg font-semibold">Target Distribution by Sector</h3>
-                  </div>
-                  <span className="text-xs font-medium px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full">
-                    Annual Plan
-                  </span>
-                </div>
-
-                {loadingCharts ? (
-                  <div className="space-y-4">
-                    {[1, 2, 3].map((i) => (
-                      <div key={i} className="animate-pulse">
-                        <div className="h-4 bg-gray-200 rounded mb-2"></div>
-                        <div className="h-2 bg-gray-100 rounded"></div>
-                      </div>
-                    ))}
-                  </div>
-                ) : targetsBySector.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
-                    <Target className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                    <p>No target data available</p>
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    {targetsBySector.map((d, index) => {
-                      const percentage = (d.total / Math.max(...targetsBySector.map(x => x.total), 1)) * 100;
-                      const colors = ['bg-emerald-500', 'bg-blue-500', 'bg-purple-500', 'bg-amber-500', 'bg-pink-500'];
-                      const color = colors[index % colors.length];
-                      
-                      return (
-                        <div key={d.sector} className="space-y-2">
-                          <div className="flex justify-between items-center">
-                            <div className="flex items-center">
-                              <div className={`w-3 h-3 rounded-full ${color} mr-3`}></div>
-                              <span className="font-medium text-gray-700 truncate">{d.sector}</span>
-                            </div>
-                            <span className="font-bold text-gray-900">{d.total.toFixed(2)}</span>
-                          </div>
-                          <div className="relative h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div
-                              className={`absolute top-0 left-0 h-full ${color} rounded-full transition-all duration-1000 ease-out`}
-                              style={{ width: `${statsVisible ? percentage : 0}%` }}
-                            ></div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Indicators by Department */}
-              <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-xl transition-shadow">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center">
-                    <BarChart className="w-5 h-5 text-green-600 mr-3" />
-                    <h3 className="text-lg font-semibold">Indicators per Department</h3>
-                  </div>
-                  <span className="text-xs font-medium px-3 py-1 bg-green-50 text-green-700 rounded-full">
-                    Active
-                  </span>
-                </div>
-
-                {loadingCharts ? (
-                  <div className="space-y-4">
-                    {[1, 2, 3].map((i) => (
-                      <div key={i} className="animate-pulse">
-                        <div className="h-4 bg-gray-200 rounded mb-2"></div>
-                        <div className="h-2 bg-gray-100 rounded"></div>
-                      </div>
-                    ))}
-                  </div>
-                ) : indicatorsByDept.length === 0 ? (
-                  <div className="text-center py-8 text-gray-500">
-                    <FileText className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                    <p>No indicator data available</p>
-                  </div>
-                ) : (
-                  <div className="space-y-6">
-                    {indicatorsByDept.map((d, index) => {
-                      const percentage = (d.count / Math.max(...indicatorsByDept.map(x => x.count), 1)) * 100;
-                      const colors = ['bg-green-500', 'bg-cyan-500', 'bg-indigo-500', 'bg-rose-500', 'bg-orange-500'];
-                      const color = colors[index % colors.length];
-                      
-                      return (
-                        <div key={d.department} className="space-y-2">
-                          <div className="flex justify-between items-center">
-                            <div className="flex items-center flex-1 min-w-0">
-                              <Building className="w-4 h-4 text-gray-400 mr-3 flex-shrink-0" />
-                              <span className="font-medium text-gray-700 truncate">{d.department}</span>
-                            </div>
-                            <span className="font-bold text-gray-900 ml-2">{d.count}</span>
-                          </div>
-                          <div className="flex items-center space-x-3">
-                            <div className="flex-1 relative h-2 bg-gray-100 rounded-full overflow-hidden">
-                              <div
-                                className={`absolute top-0 left-0 h-full ${color} rounded-full transition-all duration-1000 ease-out`}
-                                style={{ width: `${statsVisible ? percentage : 0}%` }}
-                              ></div>
-                            </div>
-                            <span className="text-sm font-medium text-gray-600 w-10 text-right">
-                              {d.count}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* Minister KPIs Section */}
-        {(user?.role || '').toUpperCase() === 'MINISTER_VIEW' && (
-          <section className="mb-16">
-            <div className="bg-gradient-to-r from-blue-50 to-cyan-50 rounded-3xl p-8 border border-blue-100">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between mb-8">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                    Ministerial <span className="text-blue-600">Performance Overview</span>
-                  </h2>
-                  <p className="text-gray-600">Final approved performance metrics and achievements</p>
-                </div>
-                <div className="flex items-center space-x-4 mt-4 lg:mt-0">
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <input
-                      type="number"
-                      min={2000}
-                      max={2100}
-                      value={ministerYear}
-                      onChange={(e) => setMinisterYear(Number(e.target.value))}
-                      className="pl-10 pr-4 py-2 border rounded-xl bg-white focus:ring-2 focus:ring-blue-300 focus:border-blue-500 w-full"
-                    />
-                  </div>
-                  <span className="px-4 py-2 bg-blue-100 text-blue-700 rounded-xl font-medium">
-                    FY {ministerYear}
-                  </span>
-                </div>
-              </div>
-
-              {mError && (
-                <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-600 mb-6">
-                  {mError}
-                </div>
-              )}
-
-              {mLoading ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={i} className="bg-white rounded-xl p-6 animate-pulse">
-                      <div className="h-4 bg-gray-200 rounded mb-4"></div>
-                      <div className="h-8 bg-gray-200 rounded mb-2"></div>
-                      <div className="h-3 bg-gray-100 rounded"></div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                  {/* Total Indicators Card */}
-                  <div className="group bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-xl hover:border-blue-200 transition-all duration-300">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="p-3 bg-blue-50 rounded-xl group-hover:scale-110 transition-transform">
-                        <Target className="w-6 h-6 text-blue-600" />
-                      </div>
-                      <span className="text-xs font-medium px-3 py-1 bg-blue-50 text-blue-700 rounded-full">
-                        Total
-                      </span>
-                    </div>
-                    <div className="text-3xl font-bold text-gray-900 mb-2">
-                      {ministerKpis.totalIndicators}
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      Performance Indicators
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-gray-100">
-                      <div className="text-xs text-gray-500">
-                        Across all departments
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Sector Average Achievement Card */}
-                  <div className="group bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-xl hover:border-emerald-200 transition-all duration-300">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="p-3 bg-emerald-50 rounded-xl group-hover:scale-110 transition-transform">
-                        <TrendingUp className="w-6 h-6 text-emerald-600" />
-                      </div>
-                      <span className="text-xs font-medium px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full">
-                        Average
-                      </span>
-                    </div>
-                    <div className="text-3xl font-bold text-gray-900 mb-2">
-                      {ministerKpis.sectorAvgAch.toFixed(1)}%
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      Sector Achievement
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-gray-100">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-gray-500">Based on approved performance</span>
-                        <span className="font-medium text-emerald-600">
-                          {ministerKpis.sectorAvgAch > 100 ? 'Exceeded' : 'On Track'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Total Performance Card */}
-                  <div className="group bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-xl hover:border-purple-200 transition-all duration-300">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="p-3 bg-purple-50 rounded-xl group-hover:scale-110 transition-transform">
-                        <Activity className="w-6 h-6 text-purple-600" />
-                      </div>
-                      <span className="text-xs font-medium px-3 py-1 bg-purple-50 text-purple-700 rounded-full">
-                        Aggregate
-                      </span>
-                    </div>
-                    <div className="text-3xl font-bold text-gray-900 mb-2">
-                      {ministerKpis.totalPerformance.toFixed(2)}
-                    </div>
-                    <div className="text-sm text-gray-600">
-                      Total Performance Value
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-gray-100">
-                      <div className="text-xs text-gray-500">
-                        Sum of all approved performances
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Top Indicators Card */}
-                  <div className="group bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-xl hover:border-amber-200 transition-all duration-300">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="p-3 bg-amber-50 rounded-xl group-hover:scale-110 transition-transform">
-                        <Award className="w-6 h-6 text-amber-600" />
-                      </div>
-                      <span className="text-xs font-medium px-3 py-1 bg-amber-50 text-amber-700 rounded-full">
-                        Top 5
-                      </span>
-                    </div>
-                    <div className="mb-4">
-                      <div className="text-xl font-bold text-gray-900">
-                        Leading Indicators
-                      </div>
-                    </div>
-                    <div className="space-y-3">
-                      {ministerKpis.topIndicators.length === 0 ? (
-                        <div className="text-sm text-gray-500 py-2">No performance data available</div>
-                      ) : (
-                        ministerKpis.topIndicators.map((t, index) => (
-                          <div key={t.id} className="flex items-center justify-between">
-                            <div className="flex items-center min-w-0">
-                              <div className="w-6 h-6 rounded-full bg-amber-100 text-amber-800 text-xs font-bold flex items-center justify-center mr-3">
-                                {index + 1}
-                              </div>
-                              <span className="text-sm font-medium text-gray-700 truncate">
-                                {t.name}
-                              </span>
-                            </div>
-                            <span className="text-sm font-bold text-gray-900">
-                              {t.value.toFixed(2)}
-                            </span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </section>
-        )}
 
         {/* About Section */}
         <section
@@ -949,7 +479,7 @@ export default function Home() {
       </footer>
 
       {/* Add custom styles for grid pattern */}
-      <style jsx>{`
+      <style>{`
         .bg-grid-pattern {
           background-image: 
             linear-gradient(to right, rgba(255,255,255,0.1) 1px, transparent 1px),

@@ -57,6 +57,12 @@ export default function Performances() {
   const [expandedSectors, setExpandedSectors] = useState<Set<string>>(new Set());
   const [expandedDepartments, setExpandedDepartments] = useState<Set<string>>(new Set());
   const [perfWindowOpen, setPerfWindowOpen] = useState<boolean>(true);
+  const [perfWindowByQuarter, setPerfWindowByQuarter] = useState<Record<1|2|3|4, boolean>>({
+    1: true,
+    2: true,
+    3: true,
+    4: true,
+  });
 
   const [perfModal, setPerfModal] = useState<{ 
     open: boolean; 
@@ -98,12 +104,13 @@ export default function Performances() {
     try {
       const grYear = toGregorianYearFromEthiopian(etYear);
       const grPrevYear = toGregorianYearFromEthiopian(etYear - 1);
-      const [plansCurrRes, plansPrevRes, bRes, pResCurr, pResPrev] = await Promise.all([
+      const [plansCurrRes, plansPrevRes, bRes, pResCurr, pResPrev, winRes] = await Promise.all([
         api.get('/api/annual-plans/', { params: { year: grYear } }),
         api.get('/api/annual-plans/', { params: { year: grPrevYear } }),
         api.get('/api/breakdowns/'),
         api.get('/api/performances/', { params: { year: grYear } }),
         api.get('/api/performances/', { params: { year: grPrevYear } }),
+        api.get('/api/submission-windows/status/', { params: { year: grYear } }),
       ]);
       
       const currPlans: AnnualPlan[] = plansCurrRes.data || [];
@@ -123,6 +130,20 @@ export default function Performances() {
         if (pr) pmap[`${pr.plan}-${pr.quarter}`] = pr;
       }
       setPerfs(pmap);
+      
+      // Update performance window state (overall and per quarter) based on backend configuration
+      const win = (winRes as any)?.data;
+      if (win && win.performance_windows) {
+        const perQuarter: Record<1|2|3|4, boolean> = {
+          1: Boolean(win.performance_windows['1']),
+          2: Boolean(win.performance_windows['2']),
+          3: Boolean(win.performance_windows['3']),
+          4: Boolean(win.performance_windows['4']),
+        };
+        setPerfWindowByQuarter(perQuarter);
+        // Overall window flag: at least one quarter open
+        setPerfWindowOpen(perQuarter[1] || perQuarter[2] || perQuarter[3] || perQuarter[4]);
+      }
       
       // Auto-expand first sector and department
       if (Object.keys(grouped).length > 0) {
@@ -273,6 +294,8 @@ export default function Performances() {
     if (!(st === 'APPROVED' || st === 'VALIDATED' || st === 'FINAL_APPROVED')) return false;
 
     if (quarter) {
+      // Respect per-quarter submission window from backend
+      if (!perfWindowByQuarter[quarter]) return false;
       const key = `${planId}-${quarter}`;
       const perfStatus = (perfs[key]?.status || 'DRAFT').toUpperCase();
       return perfStatus === 'DRAFT' || perfStatus === 'REJECTED';
@@ -940,7 +963,8 @@ export default function Performances() {
         value: initial,
         indicatorName: p.indicator_name,
         planValue: planQ(q),
-        annualTarget: p.target
+        annualTarget: p.target,
+        varianceDescription: '',
       });
     };
 
@@ -1032,6 +1056,7 @@ export default function Performances() {
                             ? 'hover:shadow-sm hover:scale-[1.02] cursor-pointer' 
                             : 'cursor-not-allowed'
                         }`}
+                        title={qValue || '-'}
                       >
                         <div className="text-xs mb-1">Performance</div>
                         <div className="font-semibold">{qValue || '-'}</div>

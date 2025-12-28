@@ -69,10 +69,11 @@ export default function QuarterlyBreakdowns() {
     setError(null);
     try {
       const gregYear = toGregorianYearFromEthiopian(year);
-      const [plansRes, bRes, pRes] = await Promise.all([
+      const [plansRes, bRes, pRes, winRes] = await Promise.all([
         api.get('/api/annual-plans/', { params: { year: gregYear } }),
         api.get('/api/breakdowns/'),
         showPerformance ? api.get('/api/performances/') : Promise.resolve({ data: [] }),
+        api.get('/api/submission-windows/status/', { params: { year: gregYear } }),
       ]);
       const all: AnnualPlan[] = plansRes.data || [];
       setAllPlans(all);
@@ -90,6 +91,12 @@ export default function QuarterlyBreakdowns() {
         }
       }
       setPerfs(pmap);
+
+      // Update breakdown window state based on backend configuration
+      const win = (winRes as any)?.data;
+      if (win && typeof win.is_breakdown_window_open === 'boolean') {
+        setPlanWindowOpen(Boolean(win.is_breakdown_window_open));
+      }
       
       // Auto-expand first sector and department
       if (Object.keys(grouped).length > 0) {

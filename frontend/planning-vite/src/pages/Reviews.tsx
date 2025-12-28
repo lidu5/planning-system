@@ -19,7 +19,7 @@ import {
   FileText,
   Target,
   Award,
-  Eye
+  Eye,
 } from 'lucide-react';
 
 type AnnualPlan = {
@@ -54,6 +54,37 @@ type Performance = {
   variance_description?: string;
 };
 
+type DepartmentSummary = {
+  department_id: number;
+  department_name: string;
+  expected_breakdowns: number;
+  approved_breakdowns: number;
+  expected_performances: number;
+  approved_performances: number;
+};
+
+type MinisterReviewSummary = {
+  year: number;
+  departments: DepartmentSummary[];
+  totals: {
+    expected_breakdowns: number;
+    approved_breakdowns: number;
+    expected_performances: number;
+    approved_performances: number;
+  };
+  all_breakdowns_approved: boolean;
+  all_performances_approved: boolean;
+};
+
+type ActivityLogEntry = {
+  id: string;
+  time: string;
+  indicator_name: string;
+  department_name?: string;
+  item_type: 'BREAKDOWN' | 'PERFORMANCE';
+  action: 'APPROVED' | 'REJECTED' | 'EDITED';
+};
+
 export default function Reviews() {
   const { user } = useAuth();
   const thisYearEC = getCurrentEthiopianDate()[0];
@@ -83,6 +114,10 @@ export default function Reviews() {
     value: string;
   }>({ open: false, item: null, value: '' });
 
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>([]);
+
+  const [summary, setSummary] = useState<MinisterReviewSummary | null>(null);
+
   const isMinister = (user?.role || '').toUpperCase() === 'STATE_MINISTER';
 
   const loadData = async (showRefresh = false) => {
@@ -93,14 +128,27 @@ export default function Reviews() {
     }
     setError(null);
     try {
-      const [plansRes, bRes, pRes] = await Promise.all([
-        api.get('/api/annual-plans/'),
+      const gregYear = year ? toGregorianYearFromEthiopian(year) : undefined;
+      const params = gregYear ? { year: gregYear } : {};
+
+      const [plansRes, bRes, pRes, summaryRes] = await Promise.all([
+        api.get('/api/annual-plans/', { params }),
         api.get('/api/breakdowns/'),
-        api.get('/api/performances/'),
+        api.get('/api/performances/', { params }),
+        (user?.role || '').toUpperCase() === 'STATE_MINISTER'
+          ? api.get('/api/reviews/summary/', { params })
+          : Promise.resolve({ data: null }),
       ]);
       setPlans(plansRes.data || []);
       setBreakdowns(bRes.data || []);
       setPerfs(pRes.data || []);
+
+      const role = (user?.role || '').toUpperCase();
+      if (role === 'STATE_MINISTER' && summaryRes && summaryRes.data) {
+        setSummary(summaryRes.data as MinisterReviewSummary);
+      } else {
+        setSummary(null);
+      }
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Failed to load data');
     } finally {
@@ -218,15 +266,28 @@ export default function Reviews() {
   };
 
   const saveEditPerf = async () => {
-    if (!editPerf.item) return;
+    const item = editPerf.item;
+    if (!item) return;
     try {
-      await api.put(`/api/performances/${editPerf.item.id}/`, {
-        plan: editPerf.item.plan,
-        quarter: editPerf.item.quarter,
+      await api.put(`/api/performances/${item.id}/`, {
+        plan: item.plan,
+        quarter: item.quarter,
         value: editPerf.value,
-        status: editPerf.item.status,
+        status: item.status,
       });
       setEditPerf({ open: false, item: null, value: '' });
+      const p = planById[item.plan];
+      setActivityLog((prev) => [
+        {
+          id: `PF-${item.id}-EDITED-${Date.now()}`,
+          time: new Date().toISOString(),
+          indicator_name: p?.indicator_name || 'Unknown indicator',
+          department_name: p?.department_name,
+          item_type: 'PERFORMANCE',
+          action: 'EDITED',
+        },
+        ...prev,
+      ]);
       await loadData(true);
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Update failed');
@@ -237,6 +298,18 @@ export default function Reviews() {
     if (!confirm(`Approve quarterly breakdown for this indicator?`)) return;
     try {
       await api.post(`/api/breakdowns/${b.id}/approve/`);
+      const p = planById[b.plan];
+      setActivityLog((prev) => [
+        {
+          id: `BD-${b.id}-APPROVED-${Date.now()}`,
+          time: new Date().toISOString(),
+          indicator_name: p?.indicator_name || 'Unknown indicator',
+          department_name: p?.department_name,
+          item_type: 'BREAKDOWN',
+          action: 'APPROVED',
+        },
+        ...prev,
+      ]);
       await loadData(true);
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Approval failed');
@@ -251,6 +324,18 @@ export default function Reviews() {
     
     try {
       await api.post(`/api/breakdowns/${b.id}/reject/`, { comment });
+      const p = planById[b.plan];
+      setActivityLog((prev) => [
+        {
+          id: `BD-${b.id}-REJECTED-${Date.now()}`,
+          time: new Date().toISOString(),
+          indicator_name: p?.indicator_name || 'Unknown indicator',
+          department_name: p?.department_name,
+          item_type: 'BREAKDOWN',
+          action: 'REJECTED',
+        },
+        ...prev,
+      ]);
       await loadData(true);
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Rejection failed');
@@ -261,6 +346,18 @@ export default function Reviews() {
     if (!confirm(`Approve Q${pr.quarter} performance report for this indicator?`)) return;
     try {
       await api.post(`/api/performances/${pr.id}/approve/`);
+      const p = planById[pr.plan];
+      setActivityLog((prev) => [
+        {
+          id: `PF-${pr.id}-APPROVED-${Date.now()}`,
+          time: new Date().toISOString(),
+          indicator_name: p?.indicator_name || 'Unknown indicator',
+          department_name: p?.department_name,
+          item_type: 'PERFORMANCE',
+          action: 'APPROVED',
+        },
+        ...prev,
+      ]);
       await loadData(true);
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Approval failed');
@@ -275,6 +372,18 @@ export default function Reviews() {
     
     try {
       await api.post(`/api/performances/${pr.id}/reject/`, { comment });
+      const p = planById[pr.plan];
+      setActivityLog((prev) => [
+        {
+          id: `PF-${pr.id}-REJECTED-${Date.now()}`,
+          time: new Date().toISOString(),
+          indicator_name: p?.indicator_name || 'Unknown indicator',
+          department_name: p?.department_name,
+          item_type: 'PERFORMANCE',
+          action: 'REJECTED',
+        },
+        ...prev,
+      ]);
       await loadData(true);
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Rejection failed');
@@ -324,12 +433,26 @@ export default function Reviews() {
       await loadData(true);
       alert('Approved indicators have been submitted to Strategic Affairs Staff.');
     } catch (e: any) {
-      setError(
-        e?.response?.data?.detail || 'Failed to submit approved indicators to Strategic Affairs Staff'
-      );
+      const backendMessage = e?.response?.data?.detail;
+      const friendlyMessage =
+        backendMessage || 'Failed to submit approved indicators to Strategic Affairs Staff.';
+
+      // Show detailed reason in the page error banner
+      setError(friendlyMessage);
+
+      // Also show a dialog so the State Minister immediately understands why it failed
+      alert(friendlyMessage);
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const submitPlansToStrategic = () => {
+    return submitValidatedToStrategic();
+  };
+
+  const submitPerformancesToStrategic = () => {
+    return submitValidatedToStrategic();
   };
 
   return (
@@ -418,9 +541,14 @@ export default function Reviews() {
                   <p className="text-2xl font-bold text-gray-900 mt-2">
                     {stats.approvalRate}%
                   </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Of all submissions
-                  </p>
+                  {summary ? (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Expected BD: {summary.totals.expected_breakdowns}, Approved: {summary.totals.approved_breakdowns}{' '}
+                      · Expected PF: {summary.totals.expected_performances}, Approved: {summary.totals.approved_performances}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-500 mt-1">Of all submissions</p>
+                  )}
                 </div>
                 <div className="p-3 bg-purple-100 rounded-xl">
                   <Award className="w-6 h-6 text-purple-600" />
@@ -428,6 +556,39 @@ export default function Reviews() {
               </div>
             </div>
           </div>
+
+          {/* Per-department expected vs approved summary for State Minister */}
+          {isMinister && summary && summary.departments && summary.departments.length > 0 && (
+            <div className="mb-6 bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+              <h3 className="text-sm font-semibold text-gray-800 mb-3">
+                Expected vs approved by department (current year)
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Department</th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Breakdowns (exp / appr)</th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Performance (exp / appr)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {summary.departments.map((d) => (
+                      <tr key={d.department_id}>
+                        <td className="px-3 py-2 text-gray-800">{d.department_name}</td>
+                        <td className="px-3 py-2 text-gray-700">
+                          {d.expected_breakdowns} / {d.approved_breakdowns}
+                        </td>
+                        <td className="px-3 py-2 text-gray-700">
+                          {d.expected_performances} / {d.approved_performances}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Search and Controls */}
           <div className="space-y-4 mb-6">
@@ -884,6 +1045,15 @@ export default function Reviews() {
                                 <XCircle className="w-4 h-4" />
                                 Reject
                               </button>
+                              {isMinister && (
+                                <button
+                                  onClick={() => openEditPerf(pr)}
+                                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors duration-200"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                  Edit
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -971,7 +1141,7 @@ export default function Reviews() {
 
         {/* Quick Stats Footer */}
         <div className="mt-6 p-6 bg-white rounded-2xl border border-gray-200 shadow-sm">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="mt-2 border-t border-gray-200 pt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="text-sm text-gray-600">
               Showing {filteredBreakdowns.length + filteredPerfs.length} pending items
               {hasActiveFilters && ' (filtered)'}
@@ -984,29 +1154,106 @@ export default function Reviews() {
                 </div>
               )}
               {isMinister && (
-                <button
-                  type="button"
-                  onClick={submitValidatedToStrategic}
-                  disabled={
-                    submitting ||
-                    (!breakdowns.some((b) => (b.status || '').toUpperCase() === 'APPROVED') &&
-                      !perfs.some((p) => (p.status || '').toUpperCase() === 'APPROVED'))
-                  }
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors duration-200 ${
-                    submitting ||
-                    (!breakdowns.some((b) => (b.status || '').toUpperCase() === 'APPROVED') &&
-                      !perfs.some((p) => (p.status || '').toUpperCase() === 'APPROVED'))
-                      ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                      : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                  }`}
-                >
-                  <Target className="w-4 h-4" />
-                  {submitting ? 'Submitting to Strategic Affairs...' : 'Submit validated to Strategic Affairs'}
-                </button>
+                <div className="flex flex-col md:flex-row gap-2">
+                  <button
+                    type="button"
+                    onClick={submitPlansToStrategic}
+                    disabled={
+                      submitting ||
+                      !summary ||
+                      !summary.all_breakdowns_approved
+                    }
+                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors duration-200 ${
+                      submitting || !summary || !summary.all_breakdowns_approved
+                        ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                    }`}
+                  >
+                    <Target className="w-4 h-4" />
+                    {submitting
+                      ? 'Submitting plans...'
+                      : !summary || !summary.all_breakdowns_approved
+                        ? 'Waiting for all expected plans'
+                        : 'Submit approved plans'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={submitPerformancesToStrategic}
+                    disabled={
+                      submitting ||
+                      !summary ||
+                      !summary.all_performances_approved
+                    }
+                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition-colors duration-200 ${
+                      submitting || !summary || !summary.all_performances_approved
+                        ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                    }`}
+                  >
+                    <Target className="w-4 h-4" />
+                    {submitting
+                      ? 'Submitting performances...'
+                      : !summary || !summary.all_performances_approved
+                        ? 'Waiting for all expected performances'
+                        : 'Submit approved performances'}
+                  </button>
+                </div>
               )}
             </div>
           </div>
         </div>
+        {/* Activity Log */}
+        {activityLog.length > 0 && (
+          <div className="mt-8 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-gray-900">Recent Review Activity</h3>
+                <p className="text-sm text-gray-500">Summary of approvals, rejections, and edits this session</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-2 text-left font-medium text-gray-600">Time</th>
+                    <th className="px-4 py-2 text-left font-medium text-gray-600">Indicator</th>
+                    <th className="px-4 py-2 text-left font-medium text-gray-600">Department</th>
+                    <th className="px-4 py-2 text-left font-medium text-gray-600">Item</th>
+                    <th className="px-4 py-2 text-left font-medium text-gray-600">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {activityLog.slice(0, 50).map((log) => (
+                    <tr key={log.id}>
+                      <td className="px-4 py-2 text-gray-600">
+                        {new Date(log.time).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-2 text-gray-800">{log.indicator_name}</td>
+                      <td className="px-4 py-2 text-gray-700">{log.department_name || '—'}</td>
+                      <td className="px-4 py-2">
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                          {log.item_type === 'BREAKDOWN' ? 'Breakdown' : 'Performance'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">
+                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold ${
+                          log.action === 'APPROVED'
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : log.action === 'REJECTED'
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-amber-100 text-amber-700'
+                        }`}>
+                          {log.action.charAt(0) + log.action.slice(1).toLowerCase()}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

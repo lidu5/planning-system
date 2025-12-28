@@ -83,6 +83,154 @@ class AnnualPlanViewSet(viewsets.ModelViewSet):
         return qs
 
 
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def submission_window_status(request):
+    """Return current submission window status for breakdown and performance.
+
+    Optional query params:
+      - year: Gregorian year to check breakdown window for (defaults to now.year)
+
+    Uses existing helpers within_annual_breakdown_window and within_quarter_submission_window.
+    """
+    now = timezone.now()
+
+    # Year: allow explicit param, default to current year
+    year_param = request.query_params.get('year')
+    try:
+        year = int(year_param) if year_param is not None else now.year
+    except ValueError:
+        year = now.year
+
+    # For breakdowns we only care if *today* is within the configured breakdown window
+    breakdown_open = within_annual_breakdown_window(now)
+
+    # For performance, we check each quarter using the helper
+    perf_windows = {}
+    for q in (1, 2, 3, 4):
+        perf_windows[str(q)] = within_quarter_submission_window(now, q)
+
+    return Response(
+        {
+            'year': year,
+            'is_breakdown_window_open': bool(breakdown_open),
+            'performance_windows': perf_windows,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def minister_review_summary(request):
+    """Summary of expected vs approved breakdowns and performances for State Minister.
+
+    Rules:
+      - Expected breakdowns: all annual plans in the minister's scope/year (each should have one breakdown).
+      - Expected performances: only for quarters whose submission window has already closed
+        (e.g. if only Q1 and Q2 windows passed, then 2 expected per indicator).
+    """
+    user = request.user
+    role = getattr(user, 'role', '').upper()
+    if role != 'STATE_MINISTER':
+        return Response({'detail': 'Only State Minister can access this summary.'}, status=status.HTTP_403_FORBIDDEN)
+
+    now = timezone.now()
+    # Year is Gregorian; if not provided, default to current year
+    year_param = request.query_params.get('year')
+    try:
+        year = int(year_param) if year_param is not None else now.year
+    except ValueError:
+        year = now.year
+
+    # Determine scope (sector/department) from user
+    dept_id = getattr(getattr(user, 'department', None), 'id', None) or getattr(user, 'department', None)
+    sector_id = getattr(getattr(user, 'sector', None), 'id', None) or getattr(user, 'sector', None)
+
+    plans_qs = AnnualPlan.objects.select_related('indicator__department__sector').filter(year=year)
+    if dept_id:
+        plans_qs = plans_qs.filter(indicator__department__id=dept_id)
+    elif sector_id:
+        plans_qs = plans_qs.filter(indicator__department__sector__id=sector_id)
+
+    # Department-wise aggregation
+    departments = {}
+
+    # Helper: which quarters are expected (current performance period only)
+    # A quarter is considered in the performance period if its submission window is open.
+    open_quarters = []
+    for q in (1, 2, 3, 4):
+        if within_quarter_submission_window(now, q):
+            open_quarters.append(q)
+
+    # Preload breakdowns and performances
+    b_qs = QuarterlyBreakdown.objects.select_related('plan__indicator__department').filter(plan__in=plans_qs)
+    p_qs = QuarterlyPerformance.objects.select_related('plan__indicator__department').filter(plan__in=plans_qs)
+
+    # Map for quick lookup
+    bd_by_plan = {bd.plan_id: bd for bd in b_qs}
+    perfs_by_plan = {}
+    for pr in p_qs:
+        perfs_by_plan.setdefault(pr.plan_id, []).append(pr)
+
+    approved_status_plan = {PlanStatus.APPROVED, PlanStatus.VALIDATED, PlanStatus.FINAL_APPROVED}
+    approved_status_perf = {PerformanceStatus.APPROVED, PerformanceStatus.VALIDATED, PerformanceStatus.FINAL_APPROVED}
+
+    for plan in plans_qs:
+        dept = plan.indicator.department
+        did = dept.id
+        if did not in departments:
+            departments[did] = {
+                'department_id': did,
+                'department_name': getattr(dept, 'name', ''),
+                'expected_breakdowns': 0,
+                'approved_breakdowns': 0,
+                'expected_performances': 0,
+                'approved_performances': 0,
+            }
+
+        info = departments[did]
+
+        # Breakdown expectation: one per annual plan
+        info['expected_breakdowns'] += 1
+        bd = bd_by_plan.get(plan.id)
+        if bd and bd.status in approved_status_plan:
+            info['approved_breakdowns'] += 1
+
+        # Performance expectation: one per *current* performance quarter for this plan
+        perf_list = perfs_by_plan.get(plan.id, [])
+        for q in open_quarters:
+            info['expected_performances'] += 1
+            perf = next((p for p in perf_list if p.quarter == q), None)
+            if perf and perf.status in approved_status_perf:
+                info['approved_performances'] += 1
+
+    # Totals and overall flags
+    total_expected_bd = sum(d['expected_breakdowns'] for d in departments.values())
+    total_approved_bd = sum(d['approved_breakdowns'] for d in departments.values())
+    total_expected_pf = sum(d['expected_performances'] for d in departments.values())
+    total_approved_pf = sum(d['approved_performances'] for d in departments.values())
+
+    all_breakdowns_approved = total_expected_bd > 0 and total_expected_bd == total_approved_bd
+    all_performances_approved = total_expected_pf > 0 and total_expected_pf == total_approved_pf
+
+    return Response(
+        {
+            'year': year,
+            'departments': list(departments.values()),
+            'totals': {
+                'expected_breakdowns': total_expected_bd,
+                'approved_breakdowns': total_approved_bd,
+                'expected_performances': total_expected_pf,
+                'approved_performances': total_approved_pf,
+            },
+            'all_breakdowns_approved': all_breakdowns_approved,
+            'all_performances_approved': all_performances_approved,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def submit_to_strategic(request):
@@ -100,24 +248,90 @@ def submit_to_strategic(request):
     if role != 'STATE_MINISTER':
         return Response({'detail': 'Only State Minister can submit to Strategic Affairs Staff.'}, status=status.HTTP_403_FORBIDDEN)
 
+    # Optional mode to allow submitting plans and performances separately.
+    # mode can be:
+    #   - 'plans': only breakdown plans are submitted/validated
+    #   - 'performances': only quarterly performances are submitted/validated
+    #   - anything else / missing: treat as both together (original behaviour)
+    mode = (request.data.get('mode') or '').strip().lower()
+
     breakdown_ids = request.data.get('breakdown_ids') or []
     performance_ids = request.data.get('performance_ids') or []
 
     if not isinstance(breakdown_ids, list) or not isinstance(performance_ids, list):
         return Response({'detail': 'Invalid payload. Expected lists of IDs.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Update only APPROVED items so flow is: SUBMITTED -> APPROVED (State Minister) -> sent_to_strategic=True -> VALIDATED (Strategic)
-    bqs = QuarterlyBreakdown.objects.filter(id__in=breakdown_ids, status=PlanStatus.APPROVED)
-    pqs = QuarterlyPerformance.objects.filter(id__in=performance_ids, status=PerformanceStatus.APPROVED)
+    # Scope: limit consistency checks to the State Minister's area (sector/department)
+    scope_breakdowns = QuarterlyBreakdown.objects.select_related('plan', 'plan__indicator__department__sector')
+    scope_perfs = QuarterlyPerformance.objects.select_related('plan', 'plan__indicator__department__sector')
 
-    updated_breakdowns = bqs.update(sent_to_strategic=True)
-    updated_perfs = pqs.update(sent_to_strategic=True)
+    user = request.user
+    dept_id = getattr(getattr(user, 'department', None), 'id', None) or getattr(user, 'department', None)
+    sector_id = getattr(getattr(user, 'sector', None), 'id', None) or getattr(user, 'sector', None)
+
+    if dept_id:
+        scope_breakdowns = scope_breakdowns.filter(plan__indicator__department__id=dept_id)
+        scope_perfs = scope_perfs.filter(plan__indicator__department__id=dept_id)
+    elif sector_id:
+        scope_breakdowns = scope_breakdowns.filter(plan__indicator__department__sector__id=sector_id)
+        scope_perfs = scope_perfs.filter(plan__indicator__department__sector__id=sector_id)
+
+    # Determine relevant years from the items being submitted
+    submit_bd_qs = QuarterlyBreakdown.objects.filter(id__in=breakdown_ids)
+    submit_pf_qs = QuarterlyPerformance.objects.filter(id__in=performance_ids)
+    years = set()
+    if mode in ('', 'both', 'plans'):
+        years.update(submit_bd_qs.values_list('plan__year', flat=True))
+    if mode in ('', 'both', 'performances'):
+        years.update(submit_pf_qs.values_list('plan__year', flat=True))
+
+    # Business rule: State Minister can submit only when ALL items of the selected type
+    # (plans and/or performances) from all Lead Executive Bodies (in their scope and year)
+    # are approved (no draft/submitted/rejected left). Partial submission within each
+    # category is not allowed.
+    blocking_statuses_plan = [PlanStatus.DRAFT, PlanStatus.SUBMITTED, PlanStatus.REJECTED]
+    blocking_statuses_perf = [
+        PerformanceStatus.DRAFT,
+        PerformanceStatus.SUBMITTED,
+        PerformanceStatus.REJECTED,
+    ]
+
+    for y in years:
+        pending_bd = scope_breakdowns.filter(plan__year=y, status__in=blocking_statuses_plan)
+        pending_pf = scope_perfs.filter(plan__year=y, status__in=blocking_statuses_perf)
+
+        block_plans = mode in ('', 'both', 'plans') and pending_bd.exists()
+        block_perfs = mode in ('', 'both', 'performances') and pending_pf.exists()
+
+        if block_plans or block_perfs:
+            if mode in ('plans',):
+                detail = 'Submission blocked: all quarterly breakdown plans for the year must be approved before sending to Strategic Affairs Staff. Please ensure there are no draft/submitted/rejected items.'
+            elif mode in ('performances',):
+                detail = 'Submission blocked: all quarterly performance reports for the year must be approved before sending to Strategic Affairs Staff. Please ensure there are no draft/submitted/rejected items.'
+            else:
+                detail = 'Submission blocked: all quarterly breakdown plans and performance reports for the year must be approved before sending to Strategic Affairs Staff. Please ensure there are no draft/submitted/rejected items.'
+
+            return Response({'detail': detail}, status=status.HTTP_400_BAD_REQUEST)
+
+    # At this point, all relevant items in scope and year(s) are approved/validated/final approved.
+    # Update only APPROVED items so flow is: SUBMITTED -> APPROVED (State Minister)
+    # -> sent_to_strategic=True -> VALIDATED (Strategic).
+    breakdowns_sent = 0
+    performances_sent = 0
+
+    if mode in ('', 'both', 'plans') and breakdown_ids:
+        bqs = scope_breakdowns.filter(id__in=breakdown_ids, status=PlanStatus.APPROVED)
+        breakdowns_sent = bqs.update(sent_to_strategic=True)
+
+    if mode in ('', 'both', 'performances') and performance_ids:
+        pqs = scope_perfs.filter(id__in=performance_ids, status=PerformanceStatus.APPROVED)
+        performances_sent = pqs.update(sent_to_strategic=True)
 
     return Response(
         {
             'detail': 'Approved items submitted to Strategic Affairs Staff.',
-            'breakdowns_sent': updated_breakdowns,
-            'performances_sent': updated_perfs,
+            'breakdowns_sent': breakdowns_sent,
+            'performances_sent': performances_sent,
         },
         status=status.HTTP_200_OK,
     )

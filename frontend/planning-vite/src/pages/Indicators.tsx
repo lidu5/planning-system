@@ -15,7 +15,10 @@ import {
   Layers,
   Building,
   Tag,
-  Hash
+  Hash,
+  ArrowUp,
+  CheckCircle,
+  AlertCircle
 } from 'lucide-react';
 
 type Department = { id: number; name: string; sector?: { id: number; name: string } };
@@ -38,7 +41,9 @@ export default function Indicators() {
   const [groups, setGroups] = useState<IndicatorGroup[]>([]);
   const [groupIds, setGroupIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState<Indicator | null>(null);
   const [page, setPage] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
@@ -48,11 +53,14 @@ export default function Indicators() {
     department: '',
     hasGroup: ''
   });
+  const [isFormVisible, setIsFormVisible] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const pageSize = 15;
 
   const fetchAll = async () => {
     try {
       setLoading(true);
+      setListError(null);
       const [indRes, depRes, secRes] = await Promise.all([
         api.get('/api/indicators/'),
         api.get('/api/departments/'),
@@ -63,11 +71,15 @@ export default function Indicators() {
       setSectors(secRes.data);
     } catch (e: any) {
       const msg = e?.userMessage || getErrorMessage(e, 'Failed to load data');
-      setError(msg);
+      setListError(msg);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchAll();
+  }, []);
 
   useEffect(() => {
     setPage(1);
@@ -108,11 +120,13 @@ export default function Indicators() {
     [filteredIndicators, page, pageSize]
   );
 
-  useEffect(() => { fetchAll(); }, []);
-
   useEffect(() => {
     const loadGroups = async () => {
-      if (!departmentId) { setGroups([]); setGroupIds([]); return; }
+      if (!departmentId) { 
+        setGroups([]); 
+        setGroupIds([]); 
+        return; 
+      }
       try {
         const res = await api.get(`/api/indicator-groups`, { params: { department: departmentId } });
         setGroups(res.data);
@@ -129,29 +143,75 @@ export default function Indicators() {
     return departments.filter((d) => (d.sector?.id ?? null) === sectorId);
   }, [departments, sectorId]);
 
+  const resetForm = () => {
+    setEditing(null);
+    setName('');
+    setUnit('');
+    setDescription('');
+    setSectorId('');
+    setDepartmentId('');
+    setGroupIds([]);
+    setFormError(null);
+    setIsFormVisible(true);
+  };
+
+  const handleAddNewIndicator = () => {
+    resetForm();
+    // Scroll to form smoothly
+    setTimeout(() => {
+      document.getElementById('indicator-form')?.scrollIntoView({ 
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }, 100);
+  };
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    setFormError(null);
+    setSuccessMessage(null);
+    
     if (!departmentId) {
-      setError('Please select a department');
+      setFormError('Please select a department');
       return;
     }
-    try {
-      const payload = { name, unit, description, department_id: departmentId, group_ids: groupIds };
-      if (editing) await api.put(`/api/indicators/${editing.id}/`, payload);
-      else await api.post('/api/indicators/', payload);
+    
+    if (!name.trim()) {
+      setFormError('Indicator name is required');
+      return;
+    }
 
-      setName('');
-      setUnit('');
-      setDescription('');
-      setSectorId('');
-      setDepartmentId('');
-      setGroupIds([]);
-      setEditing(null);
+    setIsSubmitting(true);
+    try {
+      const payload = { 
+        name: name.trim(), 
+        unit: unit.trim() || undefined, 
+        description: description.trim() || undefined, 
+        department_id: departmentId, 
+        group_ids: groupIds 
+      };
+      
+      if (editing) {
+        await api.put(`/api/indicators/${editing.id}/`, payload);
+        setSuccessMessage(`Indicator "${name}" updated successfully!`);
+      } else {
+        await api.post('/api/indicators/', payload);
+        setSuccessMessage(`Indicator "${name}" created successfully!`);
+        resetForm(); // Clear form on successful creation
+      }
+      
       fetchAll();
+      
+      // Auto-hide success message after 4 seconds
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 4000);
+      
     } catch (e: any) {
       const msg = e?.userMessage || getErrorMessage(e, 'Save failed');
-      setError(msg);
+      setFormError(msg);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -164,16 +224,31 @@ export default function Indicators() {
     setSectorId(sec as any);
     setDepartmentId(i.department.id);
     setGroupIds((i.groups || []).map((g) => g.id));
+    setIsFormVisible(true);
+    
+    // Scroll to form
+    setTimeout(() => {
+      document.getElementById('indicator-form')?.scrollIntoView({ 
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }, 100);
   };
 
   const onDelete = async (i: Indicator) => {
-    if (!confirm(`Delete indicator "${i.name}"?`)) return;
+    if (!confirm(`Are you sure you want to delete indicator "${i.name}"? This action cannot be undone.`)) return;
     try {
       await api.delete(`/api/indicators/${i.id}/`);
+      setSuccessMessage(`Indicator "${i.name}" deleted successfully!`);
       fetchAll();
+      
+      // Auto-hide success message after 4 seconds
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 4000);
     } catch (e: any) {
       const msg = e?.userMessage || getErrorMessage(e, 'Delete failed');
-      setError(msg);
+      setListError(msg);
     }
   };
 
@@ -196,14 +271,32 @@ export default function Indicators() {
             </div>
             {isSuperuser && (
               <button
-                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                className="inline-flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+                onClick={handleAddNewIndicator}
+                className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl font-medium"
               >
                 <Plus className="w-5 h-5" />
                 Add New Indicator
               </button>
             )}
           </div>
+
+          {/* Success Message */}
+          {successMessage && (
+            <div className="mb-6 animate-fade-in">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-start gap-3">
+                <CheckCircle className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-emerald-800">{successMessage}</p>
+                </div>
+                <button
+                  onClick={() => setSuccessMessage(null)}
+                  className="text-emerald-500 hover:text-emerald-700"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Search and Filters */}
           <div className="space-y-4">
@@ -291,19 +384,30 @@ export default function Indicators() {
 
         {/* Create/Edit Form */}
         {isSuperuser && (
-          <div className="mb-8 bg-white rounded-2xl border border-gray-200 shadow-lg p-6 transition-all duration-300 hover:shadow-xl">
-            <div className="flex items-center gap-3 mb-6">
-              <div className={`p-2 rounded-lg ${editing ? 'bg-yellow-100' : 'bg-blue-100'}`}>
-                {editing ? <Edit2 className="w-5 h-5 text-yellow-600" /> : <Plus className="w-5 h-5 text-blue-600" />}
+          <div 
+            id="indicator-form"
+            className={`mb-8 bg-white rounded-2xl border border-gray-200 shadow-lg p-6 transition-all duration-300 ${isFormVisible ? 'block' : 'hidden'}`}
+          >
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className={`p-2 rounded-lg ${editing ? 'bg-yellow-100' : 'bg-blue-100'}`}>
+                  {editing ? <Edit2 className="w-5 h-5 text-yellow-600" /> : <Plus className="w-5 h-5 text-blue-600" />}
+                </div>
+                <div>
+                  <h3 className="font-semibold text-lg text-gray-900">
+                    {editing ? `Editing "${editing.name}"` : 'Create New Indicator'}
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    {editing ? 'Update the indicator details below' : 'Fill in the details to create a new indicator'}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="font-semibold text-lg text-gray-900">
-                  {editing ? `Editing "${editing.name}"` : 'Create New Indicator'}
-                </h3>
-                <p className="text-sm text-gray-600">
-                  {editing ? 'Update the indicator details below' : 'Fill in the details to create a new indicator'}
-                </p>
-              </div>
+              <button
+                onClick={() => setIsFormVisible(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
             </div>
 
             <form onSubmit={onSubmit} className="space-y-6">
@@ -311,7 +415,7 @@ export default function Indicators() {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     <Hash className="inline w-4 h-4 mr-1" />
-                    Indicator Name
+                    Indicator Name *
                   </label>
                   <input
                     value={name}
@@ -319,6 +423,7 @@ export default function Indicators() {
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="e.g., Fishery per square area"
                     required
+                    disabled={isSubmitting}
                   />
                 </div>
                 <div>
@@ -331,6 +436,7 @@ export default function Indicators() {
                     onChange={(e) => setUnit(e.target.value)}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     placeholder="e.g., tons, %, km²"
+                    disabled={isSubmitting}
                   />
                 </div>
                 <div>
@@ -347,6 +453,7 @@ export default function Indicators() {
                       setGroupIds([]);
                     }}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                    disabled={isSubmitting}
                   >
                     <option value="">All sectors</option>
                     {sectors.map((s) => (
@@ -364,6 +471,7 @@ export default function Indicators() {
                     onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : '')}
                     className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                     required
+                    disabled={isSubmitting}
                   >
                     <option value="">Select department</option>
                     {filteredDepartments.map((d) => (
@@ -386,7 +494,7 @@ export default function Indicators() {
                     setGroupIds(selected);
                   }}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 min-h-[120px]"
-                  disabled={!departmentId}
+                  disabled={!departmentId || isSubmitting}
                   title={!departmentId ? 'Select a department first' : undefined}
                 >
                   {groups.map((g) => (
@@ -409,6 +517,7 @@ export default function Indicators() {
                               type="button"
                               onClick={() => setGroupIds(prev => prev.filter(id => id !== g.id))}
                               className="ml-1 text-blue-500 hover:text-blue-700"
+                              disabled={isSubmitting}
                             >
                               <X className="w-3 h-3" />
                             </button>
@@ -427,41 +536,82 @@ export default function Indicators() {
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   rows={3}
                   placeholder="Enter a detailed description for this indicator..."
+                  disabled={isSubmitting}
                 />
               </div>
 
-              {error && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-sm text-red-600">{error}</p>
+              {formError && (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-red-600">{formError}</p>
+                  <button
+                    onClick={() => setFormError(null)}
+                    className="ml-auto text-red-500 hover:text-red-700"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
               )}
 
               <div className="flex gap-3 pt-4">
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl"
+                  disabled={isSubmitting}
+                  className={`inline-flex items-center gap-2 px-6 py-3 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl ${
+                    isSubmitting
+                      ? 'bg-gray-400 cursor-not-allowed'
+                      : editing
+                      ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600'
+                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700'
+                  }`}
                 >
-                  <Save className="w-5 h-5" />
-                  {editing ? 'Update Indicator' : 'Create Indicator'}
+                  {isSubmitting ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      {editing ? 'Updating...' : 'Creating...'}
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-5 h-5" />
+                      {editing ? 'Update Indicator' : 'Create Indicator'}
+                    </>
+                  )}
                 </button>
                 {editing && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setEditing(null);
-                      setName('');
-                      setUnit('');
-                      setDescription('');
-                      setSectorId('');
-                      setDepartmentId('');
-                    }}
-                    className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors duration-200"
+                    onClick={handleAddNewIndicator}
+                    disabled={isSubmitting}
+                    className="inline-flex items-center gap-2 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors duration-200"
                   >
-                    Cancel
+                    <Plus className="w-5 h-5" />
+                    Create New Instead
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setIsFormVisible(false)}
+                  disabled={isSubmitting}
+                  className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors duration-200"
+                >
+                  Cancel
+                </button>
               </div>
             </form>
+          </div>
+        )}
+
+        {/* Form Toggle Button (when form is hidden) */}
+        {isSuperuser && !isFormVisible && (
+          <div className="mb-8">
+            <button
+              onClick={handleAddNewIndicator}
+              className="w-full inline-flex items-center justify-center gap-2 px-6 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-dashed border-blue-200 text-blue-700 rounded-2xl hover:from-blue-100 hover:to-indigo-100 hover:border-blue-300 hover:shadow-lg transition-all duration-200 font-medium"
+            >
+              <Plus className="w-5 h-5" />
+              Click to Add New Indicator
+              <ArrowUp className="w-4 h-4 ml-auto" />
+            </button>
           </div>
         )}
 
@@ -483,6 +633,20 @@ export default function Indicators() {
             </div>
           </div>
         </div>
+
+        {/* List Error */}
+        {listError && (
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-red-600">{listError}</p>
+            <button
+              onClick={() => setListError(null)}
+              className="ml-auto text-red-500 hover:text-red-700"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* Indicators Table/Cards */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
@@ -519,6 +683,15 @@ export default function Indicators() {
                         </div>
                         <p className="text-gray-600 font-medium">No indicators found</p>
                         <p className="text-gray-500 text-sm">Try adjusting your search or filters</p>
+                        {isSuperuser && (
+                          <button
+                            onClick={handleAddNewIndicator}
+                            className="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors duration-200"
+                          >
+                            <Plus className="w-4 h-4" />
+                            Add New Indicator
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -626,6 +799,15 @@ export default function Indicators() {
                 </div>
                 <p className="text-gray-600 font-medium">No indicators found</p>
                 <p className="text-gray-500 text-sm mt-1">Try adjusting your search or filters</p>
+                {isSuperuser && (
+                  <button
+                    onClick={handleAddNewIndicator}
+                    className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors duration-200"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add New Indicator
+                  </button>
+                )}
               </div>
             ) : (
               <div className="divide-y divide-gray-200">
@@ -767,6 +949,17 @@ export default function Indicators() {
           </div>
         )}
       </div>
+
+      {/* Add fade-in animation */}
+      <style>{`
+        @keyframes fade-in {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+          animation: fade-in 0.3s ease-out;
+        }
+      `}</style>
     </div>
   );
 }
