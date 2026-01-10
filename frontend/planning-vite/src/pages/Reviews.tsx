@@ -766,9 +766,9 @@ export default function Reviews() {
           </div>
         )}
 
-        {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Quarterly Breakdowns Card */}
+        {/* Main Content - Changed from grid to flex column */}
+        <div className="flex flex-col gap-6">
+          {/* Quarterly Breakdowns Card - ON TOP */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-emerald-50 to-green-100">
               <div className="flex items-center justify-between">
@@ -911,7 +911,7 @@ export default function Reviews() {
             )}
           </div>
 
-          {/* Quarterly Performance Card */}
+          {/* Quarterly Performance Card - AT BOTTOM */}
           <div className="bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-emerald-50 to-green-100">
               <div className="flex items-center justify-between">

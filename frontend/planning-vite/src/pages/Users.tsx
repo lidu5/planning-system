@@ -75,6 +75,8 @@ export default function Users() {
   const [actionLoading, setActionLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
+  const shouldShowSector = ['ADVISOR', 'STATE_MINISTER', 'LEAD_EXECUTIVE_BODY'].includes(form.role);
+  const shouldShowDepartment = form.role === 'LEAD_EXECUTIVE_BODY';
 
   const canAccess = !!user?.is_superuser;
 
@@ -163,6 +165,21 @@ export default function Users() {
     setActionLoading(true);
     setError(null);
     try {
+      const requiresSector = ['ADVISOR', 'STATE_MINISTER', 'LEAD_EXECUTIVE_BODY'].includes(form.role);
+      const requiresDepartment = form.role === 'LEAD_EXECUTIVE_BODY';
+
+      if (requiresSector && !form.sector_id) {
+        setError('Sector is required for this role');
+        setActionLoading(false);
+        return;
+      }
+
+      if (requiresDepartment && !form.department_id) {
+        setError('Department is required for this role');
+        setActionLoading(false);
+        return;
+      }
+
       const payload: any = {
         username: form.username.trim(),
         first_name: form.first_name.trim(),
@@ -173,6 +190,12 @@ export default function Users() {
         department_id: form.department_id || null,
         is_active: form.is_active,
       };
+      if (!requiresSector) {
+        payload.sector_id = null;
+        payload.department_id = null;
+      } else if (!requiresDepartment) {
+        payload.department_id = null;
+      }
       if (form.password) payload.password = form.password;
 
       if (editing) {
@@ -879,9 +902,17 @@ export default function Users() {
                     </label>
                     <select
                       value={form.role}
-                      onChange={(e) =>
-                        setForm({ ...form, role: e.target.value })
-                      }
+                      onChange={(e) => {
+                        const newRole = e.target.value;
+                        const showSector = ['ADVISOR', 'STATE_MINISTER', 'LEAD_EXECUTIVE_BODY'].includes(newRole);
+                        const showDepartment = newRole === 'LEAD_EXECUTIVE_BODY';
+                        setForm((prev) => ({
+                          ...prev,
+                          role: newRole,
+                          sector_id: showSector ? prev.sector_id : '',
+                          department_id: showDepartment ? prev.department_id : '',
+                        }));
+                      }}
                       className="w-full border border-gray-300 rounded-xl px-4 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white"
                     >
                       {ROLES.map((r) => (
@@ -920,53 +951,57 @@ export default function Users() {
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block mb-2 text-sm font-medium text-gray-700">
-                      Sector
-                    </label>
-                    <select
-                      value={form.sector_id}
-                      onChange={(e) =>
-                        onSectorChange(
-                          e.target.value ? Number(e.target.value) : ''
-                        )
-                      }
-                      className="w-full border border-gray-300 rounded-xl px-4 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white"
-                    >
-                      <option value="">Select Sector</option>
-                      {sectors.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {shouldShowSector && (
+                    <div>
+                      <label className="block mb-2 text-sm font-medium text-gray-700">
+                        Sector
+                      </label>
+                      <select
+                        value={form.sector_id}
+                        onChange={(e) =>
+                          onSectorChange(
+                            e.target.value ? Number(e.target.value) : ''
+                          )
+                        }
+                        className="w-full border border-gray-300 rounded-xl px-4 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white"
+                      >
+                        <option value="">Select Sector</option>
+                        {sectors.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
-                  <div>
-                    <label className="block mb-2 text-sm font-medium text-gray-700">
-                      Department
-                    </label>
-                    <select
-                      value={form.department_id}
-                      onChange={(e) =>
-                        setForm({
-                          ...form,
-                          department_id: e.target.value
-                            ? Number(e.target.value)
-                            : '',
-                        })
-                      }
-                      className="w-full border border-gray-300 rounded-xl px-4 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white"
-                      disabled={!form.sector_id}
-                    >
-                      <option value="">{form.sector_id ? 'Select Department' : 'Select sector first'}</option>
-                      {departments.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {shouldShowDepartment && (
+                    <div>
+                      <label className="block mb-2 text-sm font-medium text-gray-700">
+                        Department
+                      </label>
+                      <select
+                        value={form.department_id}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            department_id: e.target.value
+                              ? Number(e.target.value)
+                              : '',
+                          })
+                        }
+                        className="w-full border border-gray-300 rounded-xl px-4 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent bg-white"
+                        disabled={!form.sector_id}
+                      >
+                        <option value="">{form.sector_id ? 'Select Department' : 'Select sector first'}</option>
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div className="md:col-span-2">
                     <label className="block mb-2 text-sm font-medium text-gray-700">
@@ -979,13 +1014,13 @@ export default function Users() {
                     </label>
                     <div className="relative">
                       <input
-                        type={showPassword ? "text" : "password"}
+                        type={showPassword ? 'text' : 'password'}
                         value={form.password}
                         onChange={(e) =>
                           setForm({ ...form, password: e.target.value })
                         }
                         className="w-full border border-gray-300 rounded-xl px-4 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent pr-12"
-                        placeholder={editing ? "Enter new password" : "Enter password"}
+                        placeholder={editing ? 'Enter new password' : 'Enter password'}
                         required={!editing}
                       />
                       <button

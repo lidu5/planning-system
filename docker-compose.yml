@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: moa-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    # environment:
+    #   - DJANGO_SETTINGS_MODULE=moa_agriplan_system.settings
+    #   - DEBUG=False
+    #   - DATABASE_URL=postgres://user:password@db:5432/dbname
+    # depends_on:
+    #   - db
+
+  frontend:
+    build:
+      context: ./frontend/planning-vite
+      dockerfile: Dockerfile
+    container_name: moa-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+# Example database service (optional, adjust and uncomment if needed)
+#  db:
+#    image: postgres:16-alpine
+#    container_name: moa-db
+#    restart: unless-stopped
+#    environment:
+#      POSTGRES_DB: moa
+#      POSTGRES_USER: moa
+#      POSTGRES_PASSWORD: moa
+#    volumes:
+#      - db_data:/var/lib/postgresql/data
+#    ports:
+#      - "5432:5432"
+
+#volumes:
+#  db_data:
