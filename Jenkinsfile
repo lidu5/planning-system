@@ -1,36 +1,44 @@
 pipeline {
     agent any
-    
+
     environment {
-        DOCKER_REGISTRY = '' // Set your Docker registry if needed
+        DOCKER_REGISTRY = ''
         DOCKER_IMAGE_BACKEND = 'moa-agriplan-backend'
         DOCKER_IMAGE_FRONTEND = 'moa-agriplan-frontend'
         DOCKER_TAG = "${env.BUILD_NUMBER}"
         DJANGO_SETTINGS_MODULE = 'moa_agriplan_system.settings'
         PYTHONUNBUFFERED = '1'
     }
-    
+
     stages {
+
         stage('Checkout') {
             steps {
                 checkout scm
             }
         }
-        
+
+        /* =========================
+           BACKEND: LINT
+        ========================== */
         stage('Lint Backend') {
             steps {
                 dir('backend') {
                     sh '''
-                        python -m venv venv
+                        python3 -m venv venv
                         . venv/bin/activate
-                        pip install -r requirements.txt
+                        python3 -m pip install --upgrade pip
+                        python3 -m pip install -r requirements.txt
                         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
                         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
                     '''
                 }
             }
         }
-        
+
+        /* =========================
+           FRONTEND: LINT
+        ========================== */
         stage('Lint Frontend') {
             steps {
                 dir('frontend/planning-vite') {
@@ -41,21 +49,28 @@ pipeline {
                 }
             }
         }
-        
+
+        /* =========================
+           BACKEND: TEST
+        ========================== */
         stage('Test Backend') {
             steps {
                 dir('backend') {
                     sh '''
-                        python -m venv venv
+                        python3 -m venv venv
                         . venv/bin/activate
-                        pip install -r requirements.txt
-                        python manage.py test
-                        python manage.py check --deploy
+                        python3 -m pip install --upgrade pip
+                        python3 -m pip install -r requirements.txt
+                        python3 manage.py test
+                        python3 manage.py check --deploy
                     '''
                 }
             }
         }
-        
+
+        /* =========================
+           FRONTEND: TEST
+        ========================== */
         stage('Test Frontend') {
             steps {
                 dir('frontend/planning-vite') {
@@ -66,10 +81,14 @@ pipeline {
                 }
             }
         }
-        
+
+        /* =========================
+           DOCKER BUILDS
+        ========================== */
         stage('Build Docker Images') {
             parallel {
-                stage('Build Backend') {
+
+                stage('Build Backend Image') {
                     steps {
                         dir('backend') {
                             script {
@@ -79,8 +98,8 @@ pipeline {
                         }
                     }
                 }
-                
-                stage('Build Frontend') {
+
+                stage('Build Frontend Image') {
                     steps {
                         dir('frontend/planning-vite') {
                             script {
@@ -92,77 +111,77 @@ pipeline {
                 }
             }
         }
-        
+
+        /* =========================
+           SECURITY SCAN
+        ========================== */
         stage('Security Scan') {
             steps {
-                script {
-                    // Run security scans on Docker images
-                    sh '''
-                        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-                            aquasec/trivy:latest image ${DOCKER_IMAGE_BACKEND}:${DOCKER_TAG}
-                        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-                            aquasec/trivy:latest image ${DOCKER_IMAGE_FRONTEND}:${DOCKER_TAG}
-                    '''
-                }
+                sh '''
+                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                        aquasec/trivy:latest image ${DOCKER_IMAGE_BACKEND}:${DOCKER_TAG}
+
+                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                        aquasec/trivy:latest image ${DOCKER_IMAGE_FRONTEND}:${DOCKER_TAG}
+                '''
             }
         }
-        
+
+        /* =========================
+           DEPLOY TO STAGING
+        ========================== */
         stage('Deploy to Staging') {
             when {
                 branch 'develop'
             }
             steps {
-                script {
-                    // Deploy to staging environment
+                sh '''
+                    docker-compose -f docker-compose.staging.yml down
+                    docker-compose -f docker-compose.staging.yml up -d
+                '''
+            }
+        }
+
+        /* =========================
+           DEPLOY TO PRODUCTION
+        ========================== */
+        stage('Deploy to Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                input message: 'Deploy to production server 10.10.20.233:8080?', ok: 'Deploy'
+
+                sshagent(['moapms-ssh-key']) {
                     sh '''
-                        docker-compose -f docker-compose.staging.yml down
-                        docker-compose -f docker-compose.staging.yml up -d
+                        ssh -o StrictHostKeyChecking=no moapms@10.10.20.233 << 'EOF'
+                            cd ~/moa-planning-system
+                            git pull origin main
+                            docker-compose -f docker-compose.prod.yml down
+                            docker-compose -f docker-compose.prod.yml up -d --build
+                            echo "Application deployed at http://10.10.20.233:8080"
+                        EOF
                     '''
                 }
             }
         }
-        
-        stage('Deploy to Production') {
-    when { branch 'main' }
-    steps {
-        input message: 'Deploy to production?', ok: 'Deploy'
-        // Use the credentials ID you created in Jenkins for moapms
-        sshagent(['moapms-ssh-key']) { 
-            sh '''
-                ssh -o StrictHostKeyChecking=no moapms@10.10.20.233 << 'EOF'
-                    cd /path/to/your/app
-                    git pull origin main
-                    # Pull new images if using a registry, or build locally on server
-                    docker-compose -f docker-compose.prod.yml up -d --build
-                EOF
-            '''
-        }
     }
-          }
-    }
-    
+
     post {
         always {
-            // Clean up workspace
             cleanWs()
         }
-        
+
         success {
-            echo 'Pipeline succeeded!'
-            
-            // Send notifications (configure as needed)
-            // slackSend(color: 'good', message: "Pipeline succeeded for ${env.JOB_NAME} - ${env.BUILD_NUMBER}")
+            echo '✅ Pipeline succeeded!'
         }
-        
+
         failure {
-            echo 'Pipeline failed!'
-            
-            // Send notifications (configure as needed)
-            // slackSend(color: 'danger', message: "Pipeline failed for ${env.JOB_NAME} - ${env.BUILD_NUMBER}")
+            echo '❌ Pipeline failed!'
         }
-        
+
         unstable {
-            echo 'Pipeline is unstable!'
+            echo '⚠️ Pipeline is unstable!'
         }
     }
 }
