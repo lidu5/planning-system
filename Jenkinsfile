@@ -123,20 +123,22 @@ pipeline {
         }
         
         stage('Deploy to Production') {
-            when {
-                branch 'main'
-            }
-            steps {
-                input message: 'Deploy to production?', ok: 'Deploy'
-                script {
-                    // Deploy to production environment
-                    sh '''
-                        docker-compose -f docker-compose.prod.yml down
-                        docker-compose -f docker-compose.prod.yml up -d
-                    '''
-                }
-            }
+    when { branch 'main' }
+    steps {
+        input message: 'Deploy to production?', ok: 'Deploy'
+        // Use the credentials ID you created in Jenkins for moapms
+        sshagent(['moapms-ssh-key']) { 
+            sh '''
+                ssh -o StrictHostKeyChecking=no moapms@10.10.20.233 << 'EOF'
+                    cd /path/to/your/app
+                    git pull origin main
+                    # Pull new images if using a registry, or build locally on server
+                    docker-compose -f docker-compose.prod.yml up -d --build
+                EOF
+            '''
         }
+    }
+          }
     }
     
     post {
