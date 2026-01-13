@@ -6,7 +6,7 @@ pipeline {
         DOCKER_IMAGE_BACKEND = 'moa-agriplan-backend'
         DOCKER_IMAGE_FRONTEND = 'moa-agriplan-frontend'
         DOCKER_TAG = "${env.BUILD_NUMBER}"
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
+        DOCKERHUB_CREDENTIALS = '' // Not using Docker registry
         REMOTE_SERVER = '10.10.20.233'
         REMOTE_USER = 'moapms'
         REMOTE_PATH = '/home/moapms/moa-planning-system'
@@ -150,8 +150,25 @@ pipeline {
                     sshagent(['moapms-ssh-key']) {
                         sh """
                             ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_SERVER} << 'EOF'
+                                # Create directory if it doesn't exist
+                                mkdir -p ${REMOTE_PATH}
                                 cd ${REMOTE_PATH}
-                                git pull origin main
+                                
+                                # Clone if not exists, else pull
+                                if [ ! -d ".git" ]; then
+                                    echo "Cloning repository for first time..."
+                                    git clone https://github.com/lidu5/planning-system.git .
+                                else
+                                    echo "Updating existing repository..."
+                                    git pull origin main
+                                fi
+                                
+                                # Ensure .env exists
+                                if [ ! -f ".env" ]; then
+                                    cp .env.example .env
+                                    echo " Please configure .env file with production settings!"
+                                    exit 1
+                                fi
                                 
                                 # Backup current database
                                 docker exec moa-db-prod pg_dump -U postgres moa_production > backup_\$(date +%Y%m%d_%H%M%S).sql || true
@@ -234,14 +251,16 @@ pipeline {
     
     post {
         always {
-            // Clean up workspace
-            cleanWs()
-            
-            // Clean up Docker images
-            sh '''
-                docker image prune -f || true
-                docker volume prune -f || true
-            '''
+            node {
+                // Clean up workspace
+                cleanWs()
+                
+                // Clean up Docker images
+                sh '''
+                    docker image prune -f || true
+                    docker volume prune -f || true
+                '''
+            }
         }
         
         success {
