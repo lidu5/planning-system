@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: moa-backend-staging
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_SETTINGS_MODULE=moa_agriplan_system.settings
+      - DEBUG=True
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=moa_staging
+      - DB_USER=postgres
+      - DB_PASSWORD=staging_password
+      - DB_HOST=db-staging
+      - DB_PORT=5432
+    depends_on:
+      - db-staging
+
+  frontend:
+    build:
+      context: ./frontend/planning-vite
+      dockerfile: Dockerfile
+    container_name: moa-frontend-staging
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+  db-staging:
+    image: postgres:16-alpine
+    container_name: moa-db-staging
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: moa_staging
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: staging_password
+    volumes:
+      - db_staging_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+
+volumes:
+  db_staging_data:

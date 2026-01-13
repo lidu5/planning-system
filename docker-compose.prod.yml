@@ -1,0 +1,51 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: moa-backend-prod
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DJANGO_SETTINGS_MODULE=moa_agriplan_system.settings
+      - DEBUG=False
+      - DB_ENGINE=django.db.backends.postgresql
+      - DB_NAME=moa_production
+      - DB_USER=postgres
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=db-prod
+      - DB_PORT=5432
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+    depends_on:
+      - db-prod
+
+  frontend:
+    build:
+      context: ./frontend/planning-vite
+      dockerfile: Dockerfile
+    container_name: moa-frontend-prod
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+  db-prod:
+    image: postgres:16-alpine
+    container_name: moa-db-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: moa_production
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - db_prod_data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+
+volumes:
+  db_prod_data:
