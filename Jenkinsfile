@@ -278,7 +278,7 @@ pipeline {
                 if (env.BRANCH_NAME == 'main') {
                     echo "🚨 Production deployment failed!"
                 } else if (env.BRANCH_NAME == 'develop') {
-                    echo "⚠️ Staging deployment failed!"
+                    echo "🚨 Staging deployment failed!"
                 }
             }
             
