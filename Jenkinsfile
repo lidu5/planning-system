@@ -244,22 +244,18 @@ pipeline {
     
     post {
         always {
-            node {
-                // Clean up workspace
-                cleanWs()
-                
-                // Clean up Docker images
-                sh '''
-                    docker image prune -f || true
-                    docker volume prune -f || true
-                '''
-            }
+            // Clean up workspace
+            cleanWs()
+            
+            // Clean up Docker images
+            sh '''
+                docker image prune -f || true
+                docker volume prune -f || true
+            '''
         }
         
         success {
             echo '✅ Pipeline succeeded!'
-            
-            // Send success notification
             script {
                 if (env.BRANCH_NAME == 'main') {
                     echo "🚀 Production deployment successful!"
