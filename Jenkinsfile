@@ -1,5 +1,5 @@
 pipeline {
-    agent any
+    agent { label 'linux' }
     
     environment {
         DOCKER_REGISTRY = '' // Set your Docker registry if needed
