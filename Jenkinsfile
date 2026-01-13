@@ -202,20 +202,6 @@ pipeline {
                                 echo "Application available at: http://${REMOTE_SERVER}:8080"
                             EOF
                         """
-                    }
-                }
-            }
-        }
-        
-        stage('Health Check') {
-            when {
-                branch 'main'
-            }
-            steps {
-                script {
-                    // Wait for deployment to settle
-                    sleep 60
-                    
                     // Check application health
                     sh """
                         curl -f http://${REMOTE_SERVER}:8080/health || exit 1
