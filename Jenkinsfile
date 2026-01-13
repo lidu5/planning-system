@@ -1,5 +1,6 @@
 pipeline {
-    agent { label 'linux' }
+   agent { label 'ansible docker dovar-ms-build' }
+
     
     environment {
         DOCKER_REGISTRY = '' // Set your Docker registry if needed
