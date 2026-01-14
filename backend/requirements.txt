@@ -11,7 +11,7 @@ whitenoise==6.8.2
 
 # Development Tools
 django-debug-toolbar==5.0.1
-django-extensions==4.0.1
+django-extensions==3.2.3
 
 # Image Processing
 Pillow==11.0.0
