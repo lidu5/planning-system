@@ -4,94 +4,92 @@ pipeline {
     }
 
     environment {
-        DOCKER_IMAGE_BACKEND = 'moa-agriplan-backend'
-        DOCKER_IMAGE_FRONTEND = 'moa-agriplan-frontend'
+        BACKEND_DIR = 'backend'
+        FRONTEND_DIR = 'frontend'
         DOCKER_TAG = "${env.BUILD_NUMBER}"
     }
 
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/lidu5/planning-system.git',
-                    credentialsId: 'moapms-ssh-key'
+                git url: 'https://github.com/lidu5/planning-system.git',
+                    credentialsId: 'moapms-ssh-key',
+                    branch: 'main'
             }
         }
 
-        stage('Lint Backend') {
+        stage('Lint & Test Backend') {
+            agent {
+                docker {
+                    image 'python:3.11'
+                    args '-v $WORKSPACE:/app'
+                }
+            }
             steps {
-                dir('backend') {
-                    // Use system Python installed on server
-                    sh 'python3 --version'
-                    sh 'pip3 install --user --upgrade pip flake8'
-                    sh 'flake8 .'
+                dir("${BACKEND_DIR}") {
+                    sh '''
+                    python3 --version
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
+                    # Lint with flake8 (install if needed)
+                    pip install flake8
+                    flake8 .
+                    # Run tests with pytest
+                    pip install pytest
+                    pytest
+                    '''
                 }
             }
         }
 
-        stage('Test Backend') {
-            steps {
-                dir('backend') {
-                    sh 'python3 -m unittest discover tests'
+        stage('Lint & Test Frontend') {
+            agent {
+                docker {
+                    image 'node:20'
+                    args '-v $WORKSPACE:/app'
                 }
             }
-        }
-
-        stage('Lint Frontend') {
             steps {
-                dir('frontend') {
-                    sh 'npm install'
-                    sh 'npm run lint'
-                }
-            }
-        }
-
-        stage('Test Frontend') {
-            steps {
-                dir('frontend') {
-                    sh 'npm test'
+                dir("${FRONTEND_DIR}") {
+                    sh '''
+                    node -v
+                    npm install
+                    # Lint frontend (assuming eslint is setup)
+                    npx eslint .
+                    # Run frontend tests (if any)
+                    npm test
+                    '''
                 }
             }
         }
 
         stage('Build Docker Images') {
-            parallel {
-                stage('Build Backend Image') {
-                    steps {
-                        dir('backend') {
-                            sh "docker build -t ${DOCKER_IMAGE_BACKEND}:${DOCKER_TAG} ."
-                        }
-                    }
-                }
-                stage('Build Frontend Image') {
-                    steps {
-                        dir('frontend') {
-                            sh "docker build -t ${DOCKER_IMAGE_FRONTEND}:${DOCKER_TAG} ."
-                        }
-                    }
+            steps {
+                script {
+                    docker.build("moa-backend:${DOCKER_TAG}", "${BACKEND_DIR}")
+                    docker.build("moa-frontend:${DOCKER_TAG}", "${FRONTEND_DIR}")
                 }
             }
         }
 
-        stage('Deploy to Production') {
+        stage('Deploy (optional)') {
             steps {
-                echo 'Deployment stage: implement your deploy commands here'
-            }
-        }
-
-        stage('Health Check') {
-            steps {
-                echo 'Health Check stage: implement your health checks here'
+                echo "Deploy step can be implemented here"
+                // e.g., docker push, ssh deploy, kubectl apply, etc.
             }
         }
     }
 
     post {
         always {
+            echo 'Cleaning workspace...'
             cleanWs()
-            sh 'docker image prune -f'
-            sh 'docker volume prune -f'
-            echo "❌ Pipeline finished!"
+        }
+        success {
+            echo 'Pipeline succeeded!'
+        }
+        failure {
+            echo 'Pipeline failed!'
         }
     }
 }
