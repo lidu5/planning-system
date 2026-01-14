@@ -6,98 +6,82 @@ pipeline {
     environment {
         DOCKER_IMAGE_BACKEND = 'moa-agriplan-backend'
         DOCKER_IMAGE_FRONTEND = 'moa-agriplan-frontend'
-        DOCKER_TAG = "${BUILD_NUMBER}"
+        DOCKER_TAG = "${env.BUILD_NUMBER}"
     }
 
     stages {
-
         stage('Checkout') {
             steps {
-                checkout scm
+                git branch: 'main',
+                    url: 'https://github.com/lidu5/planning-system.git',
+                    credentialsId: 'moapms-ssh-key'
             }
         }
 
-        /* ================= BACKEND ================= */
-
         stage('Lint Backend') {
-            agent {
-                docker {
-                    image 'python:3.11'
-                    reuseNode true
-                }
-            }
             steps {
                 dir('backend') {
-                    sh '''
-                        python --version
-                        pip install --upgrade pip
-                        pip install -r requirements.txt flake8
-                        flake8 . || true
-                    '''
+                    // Use system Python installed on server
+                    sh 'python3 --version'
+                    sh 'pip3 install --user --upgrade pip flake8'
+                    sh 'flake8 .'
                 }
             }
         }
 
         stage('Test Backend') {
-            agent {
-                docker {
-                    image 'python:3.11'
-                    reuseNode true
-                }
-            }
             steps {
                 dir('backend') {
-                    sh '''
-                        pip install -r requirements.txt
-                        python manage.py test
-                    '''
+                    sh 'python3 -m unittest discover tests'
                 }
             }
         }
 
-        /* ================= FRONTEND ================= */
-
         stage('Lint Frontend') {
-            agent {
-                docker {
-                    image 'node:18'
-                    reuseNode true
-                }
-            }
             steps {
                 dir('frontend') {
-                    sh '''
-                        npm install
-                        npm run lint || true
-                    '''
+                    sh 'npm install'
+                    sh 'npm run lint'
                 }
             }
         }
 
         stage('Test Frontend') {
-            agent {
-                docker {
-                    image 'node:18'
-                    reuseNode true
-                }
-            }
             steps {
                 dir('frontend') {
-                    sh '''
-                        npm test -- --watch=false || true
-                    '''
+                    sh 'npm test'
                 }
             }
         }
 
-        /* ================= DOCKER BUILD ================= */
-
         stage('Build Docker Images') {
+            parallel {
+                stage('Build Backend Image') {
+                    steps {
+                        dir('backend') {
+                            sh "docker build -t ${DOCKER_IMAGE_BACKEND}:${DOCKER_TAG} ."
+                        }
+                    }
+                }
+                stage('Build Frontend Image') {
+                    steps {
+                        dir('frontend') {
+                            sh "docker build -t ${DOCKER_IMAGE_FRONTEND}:${DOCKER_TAG} ."
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Production') {
             steps {
-                sh '''
-                    docker build -t ${DOCKER_IMAGE_BACKEND}:${DOCKER_TAG} backend
-                    docker build -t ${DOCKER_IMAGE_FRONTEND}:${DOCKER_TAG} frontend
-                '''
+                echo 'Deployment stage: implement your deploy commands here'
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                echo 'Health Check stage: implement your health checks here'
             }
         }
     }
@@ -105,16 +89,9 @@ pipeline {
     post {
         always {
             cleanWs()
-            sh 'docker image prune -f || true'
-            sh 'docker volume prune -f || true'
-        }
-
-        success {
-            echo '✅ Pipeline succeeded'
-        }
-
-        failure {
-            echo '❌ Pipeline failed'
+            sh 'docker image prune -f'
+            sh 'docker volume prune -f'
+            echo "❌ Pipeline finished!"
         }
     }
 }
