@@ -23,13 +23,14 @@ pipeline {
 
     stages {
 
+        /* ================= CHECKOUT ================= */
         stage('Checkout') {
             steps {
                 checkout scm
             }
         }
 
-        /* ================= BACKEND LINT ================= */
+        /* ================= LINT BACKEND ================= */
         stage('Lint Backend') {
             agent {
                 docker {
@@ -41,15 +42,14 @@ pipeline {
             steps {
                 dir('backend') {
                     sh '''
-                        pip install --upgrade pip
-                        pip install -r requirements.txt flake8
+                        pip install -r requirements.txt flake8 --no-cache-dir
                         flake8 . --count --exit-zero --max-line-length=127
                     '''
                 }
             }
         }
 
-        /* ================= FRONTEND LINT ================= */
+        /* ================= LINT FRONTEND ================= */
         stage('Lint Frontend') {
             agent {
                 docker {
@@ -67,7 +67,7 @@ pipeline {
             }
         }
 
-        /* ================= BACKEND TEST ================= */
+        /* ================= TEST BACKEND ================= */
         stage('Test Backend') {
             agent {
                 docker {
@@ -79,7 +79,7 @@ pipeline {
             steps {
                 dir('backend') {
                     sh '''
-                        pip install -r requirements.txt
+                        pip install -r requirements.txt --no-cache-dir
                         python manage.py test --verbosity=2
                         python manage.py check --deploy
                     '''
@@ -87,7 +87,7 @@ pipeline {
             }
         }
 
-        /* ================= FRONTEND TEST ================= */
+        /* ================= TEST FRONTEND ================= */
         stage('Test Frontend') {
             agent {
                 docker {
@@ -105,7 +105,7 @@ pipeline {
             }
         }
 
-        /* ================= DOCKER BUILD ================= */
+        /* ================= BUILD DOCKER IMAGES ================= */
         stage('Build Docker Images') {
             steps {
                 script {
@@ -124,8 +124,9 @@ pipeline {
 
         /* ================= DEPLOY ================= */
         stage('Deploy to Production') {
-            when { branch 'main' }
-
+            when {
+                branch 'main'
+            }
             steps {
                 input message: "Deploy to ${REMOTE_SERVER}?", ok: "Deploy"
 
@@ -145,7 +146,7 @@ pipeline {
 
                         if [ ! -f .env ]; then
                             cp .env.example .env
-                            echo "❌ Configure .env file before deployment"
+                            echo "❌ Configure .env before deployment"
                             exit 1
                         fi
 
@@ -167,8 +168,9 @@ pipeline {
 
         /* ================= HEALTH CHECK ================= */
         stage('Health Check') {
-            when { branch 'main' }
-
+            when {
+                branch 'main'
+            }
             steps {
                 sh '''
                     sleep 20
