@@ -13,7 +13,7 @@ pipeline {
         DOCKER_IMAGE_FRONTEND = 'moa-agriplan-frontend'
         DOCKER_TAG            = "${BUILD_NUMBER}"
 
-        REMOTE_SERVER = '10.10.20.223'
+        REMOTE_SERVER = '10.10.20.233'
         REMOTE_USER   = 'moapms'
         REMOTE_PATH   = '/home/moapms/moa-planning-system'
 
