@@ -35,6 +35,7 @@ pipeline {
             agent {
                 docker {
                     image 'python:3.11'
+                    label 'builtin-linux'
                     args '-v $WORKSPACE:/app -u root'
                 }
             }
@@ -72,6 +73,7 @@ pipeline {
             agent {
                 docker {
                     image 'python:3.11'
+                    label 'builtin-linux'
                     args '-v $WORKSPACE:/app -u root'
                 }
             }
