@@ -35,13 +35,13 @@ pipeline {
             agent {
                 docker {
                     image 'python:3.11'
-                    label 'builtin-linux'
-                    args '-v $WORKSPACE:/app'
+                    args '-v $WORKSPACE:/app -u root'
                 }
             }
             steps {
                 dir('backend') {
                     sh '''
+                        cd /app
                         pip install -r requirements.txt flake8 --no-cache-dir
                         flake8 . --count --exit-zero --max-line-length=127
                     '''
@@ -72,13 +72,13 @@ pipeline {
             agent {
                 docker {
                     image 'python:3.11'
-                    label 'builtin-linux'
-                    args '-v $WORKSPACE:/app'
+                    args '-v $WORKSPACE:/app -u root'
                 }
             }
             steps {
                 dir('backend') {
                     sh '''
+                        cd /app
                         pip install -r requirements.txt --no-cache-dir
                         python manage.py test --verbosity=2
                         python manage.py check --deploy
