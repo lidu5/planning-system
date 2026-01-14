@@ -2,71 +2,83 @@ pipeline {
     agent {
         label 'builtin-linux'
     }
- 
+
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
     environment {
-        DOCKER_REGISTRY = '' // Set your Docker registry if needed
-        DOCKER_IMAGE_BACKEND = 'moa-agriplan-backend'
+        DOCKER_IMAGE_BACKEND  = 'moa-agriplan-backend'
         DOCKER_IMAGE_FRONTEND = 'moa-agriplan-frontend'
-        DOCKER_TAG = "${env.BUILD_NUMBER}"
-        DOCKERHUB_CREDENTIALS = '' // Not using Docker registry
+        DOCKER_TAG            = "${BUILD_NUMBER}"
+
         REMOTE_SERVER = '10.10.20.223'
-        REMOTE_USER = 'moapms'
-        REMOTE_PATH = '/home/moapms/moa-planning-system'
+        REMOTE_USER   = 'moapms'
+        REMOTE_PATH   = '/home/moapms/moa-planning-system'
+
         DJANGO_SETTINGS_MODULE = 'moa_agriplan_system.settings'
         PYTHONUNBUFFERED = '1'
     }
- 
+
     stages {
+
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/lidu5/planning-system.git'
+                checkout scm
             }
         }
- 
+
+        /* ================= BACKEND LINT ================= */
         stage('Lint Backend') {
             agent {
                 docker {
                     image 'python:3.11'
+                    label 'builtin-linux'
                     args '-v $WORKSPACE:/app'
                 }
             }
             steps {
                 dir('backend') {
                     sh '''
-                        cd /app
                         pip install --upgrade pip
-                        pip install -r requirements.txt
-                        pip install flake8
-                        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
-                        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics || true
+                        pip install -r requirements.txt flake8
+                        flake8 . --count --exit-zero --max-line-length=127
                     '''
                 }
             }
         }
- 
+
+        /* ================= FRONTEND LINT ================= */
         stage('Lint Frontend') {
+            agent {
+                docker {
+                    image 'node:20'
+                    label 'builtin-linux'
+                }
+            }
             steps {
                 dir('frontend/planning-vite') {
                     sh '''
-                        npm install
+                        npm ci
                         npm run lint || true
                     '''
                 }
             }
         }
- 
+
+        /* ================= BACKEND TEST ================= */
         stage('Test Backend') {
             agent {
                 docker {
                     image 'python:3.11'
+                    label 'builtin-linux'
                     args '-v $WORKSPACE:/app'
                 }
             }
             steps {
                 dir('backend') {
                     sh '''
-                        cd /app
-                        pip install --upgrade pip
                         pip install -r requirements.txt
                         python manage.py test --verbosity=2
                         python manage.py check --deploy
@@ -74,163 +86,114 @@ pipeline {
                 }
             }
         }
- 
+
+        /* ================= FRONTEND TEST ================= */
         stage('Test Frontend') {
+            agent {
+                docker {
+                    image 'node:20'
+                    label 'builtin-linux'
+                }
+            }
             steps {
                 dir('frontend/planning-vite') {
                     sh '''
-                        npm install
-                        npm run test -- --watchAll=false --coverage || true
+                        npm ci
+                        npm test -- --watch=false || true
                     '''
                 }
             }
         }
- 
+
+        /* ================= DOCKER BUILD ================= */
         stage('Build Docker Images') {
-            parallel {
-                stage('Build Backend') {
-                    steps {
-                        dir('backend') {
-                            script {
-                                docker.build("${DOCKER_IMAGE_BACKEND}:${DOCKER_TAG}", ".")
-                                docker.build("${DOCKER_IMAGE_BACKEND}:latest", ".")
-                            }
-                        }
+            steps {
+                script {
+                    dir('backend') {
+                        docker.build("${DOCKER_IMAGE_BACKEND}:${DOCKER_TAG}")
+                        docker.build("${DOCKER_IMAGE_BACKEND}:latest")
                     }
-                }
- 
-                stage('Build Frontend') {
-                    steps {
-                        dir('frontend/planning-vite') {
-                            script {
-                                docker.build("${DOCKER_IMAGE_FRONTEND}:${DOCKER_TAG}", ".")
-                                docker.build("${DOCKER_IMAGE_FRONTEND}:latest", ".")
-                            }
-                        }
+
+                    dir('frontend/planning-vite') {
+                        docker.build("${DOCKER_IMAGE_FRONTEND}:${DOCKER_TAG}")
+                        docker.build("${DOCKER_IMAGE_FRONTEND}:latest")
                     }
                 }
             }
         }
- 
+
+        /* ================= DEPLOY ================= */
         stage('Deploy to Production') {
-            when {
-                branch 'main'
-            }
+            when { branch 'main' }
+
             steps {
-                input message: 'Deploy to production server ${REMOTE_SERVER}:8080?', ok: 'Deploy'
-                script {
-                    sshagent(['moapms-ssh-key']) {
-                        sh """
-                            ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_SERVER} << 'EOF'
-                                # Create directory if it doesn't exist
-                                mkdir -p ${REMOTE_PATH}
-                                cd ${REMOTE_PATH}
- 
-                                # Clone if not exists, else pull
-                                if [ ! -d ".git" ]; then
-                                    echo "Cloning repository for first time..."
-                                    git clone https://github.com/lidu5/planning-system.git .
-                                else
-                                    echo "Updating existing repository..."
-                                    git pull origin main
-                                fi
- 
-                                # Ensure .env exists
-                                if [ ! -f ".env" ]; then
-                                    cp .env.example .env
-                                    echo "⚠️  Please configure .env file with production settings!"
-                                    exit 1
-                                fi
- 
-                                # Backup current database
-                                docker exec moa-db-prod pg_dump -U postgres moa_production > backup_\$(date +%Y%m%d_%H%M%S).sql || true
- 
-                                # Stop current services
-                                docker-compose -f docker-compose.prod.yml down
- 
-                                # Start services
-                                docker-compose -f docker-compose.prod.yml up -d --build
- 
-                                # Wait for services to be ready
-                                sleep 30
- 
-                                # Run Django migrations
-                                docker exec moa-backend-prod python manage.py migrate --noinput
- 
-                                # Collect static files
-                                docker exec moa-backend-prod python manage.py collectstatic --noinput
- 
-                                echo "Production deployment completed successfully!"
-                                echo "Application available at: http://${REMOTE_SERVER}:8080"
-                            EOF
-                        """
-                    }
+                input message: "Deploy to ${REMOTE_SERVER}?", ok: "Deploy"
+
+                sshagent(['moapms-ssh-key']) {
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_SERVER} << 'EOF'
+                        set -e
+
+                        mkdir -p ${REMOTE_PATH}
+                        cd ${REMOTE_PATH}
+
+                        if [ ! -d .git ]; then
+                            git clone https://github.com/lidu5/planning-system.git .
+                        else
+                            git pull origin main
+                        fi
+
+                        if [ ! -f .env ]; then
+                            cp .env.example .env
+                            echo "❌ Configure .env file before deployment"
+                            exit 1
+                        fi
+
+                        docker-compose -f docker-compose.prod.yml down
+                        docker-compose -f docker-compose.prod.yml up -d --build
+
+                        sleep 20
+
+                        docker exec moa-backend-prod python manage.py migrate --noinput
+                        docker exec moa-backend-prod python manage.py collectstatic --noinput
+
+                        echo "✅ Deployment completed"
+                        echo "🌐 http://${REMOTE_SERVER}:8080"
+                    EOF
+                    """
                 }
             }
         }
- 
+
+        /* ================= HEALTH CHECK ================= */
         stage('Health Check') {
-            when {
-                branch 'main'
-            }
+            when { branch 'main' }
+
             steps {
-                script {
-                    // Wait for deployment to settle
-                    sleep 60
- 
-                    // Check application health
-                    sh '''
-                        curl -f http://${REMOTE_SERVER}:8080/health || exit 1
-                        curl -f http://${REMOTE_SERVER}:8080/api/ || exit 1
-                        echo "Health checks passed!"
-                    '''
-                }
+                sh '''
+                    sleep 20
+                    curl -f http://${REMOTE_SERVER}:8080/health
+                    curl -f http://${REMOTE_SERVER}:8080/api/
+                '''
             }
         }
     }
- 
+
     post {
         always {
-            // Clean up workspace
             cleanWs()
- 
-            // Clean up Docker images
             sh '''
                 docker image prune -f || true
                 docker volume prune -f || true
             '''
         }
- 
+
         success {
-            echo '✅ Pipeline succeeded!'
- 
-            // Send success notification
-            script {
-                if (env.BRANCH_NAME == 'main') {
-                    echo "🚀 Production deployment successful!"
-                    echo "📱 Application available at: http://${REMOTE_SERVER}:8080"
-                }
-            }
+            echo '✅ PIPELINE SUCCESS'
         }
- 
+
         failure {
-            echo '❌ Pipeline failed!'
- 
-            // Send failure notification
-            script {
-                if (env.BRANCH_NAME == 'main') {
-                    echo "🚨 Production deployment failed!"
-                }
-            }
-        }
- 
-        unstable {
-            echo '⚠️ Pipeline is unstable!'
-        }
- 
-        cleanup {
-            // Additional cleanup if needed
-            echo '🧹 Cleaning up...'
+            echo '❌ PIPELINE FAILED'
         }
     }
 }
