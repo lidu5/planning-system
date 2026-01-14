@@ -127,7 +127,7 @@ pipeline {
             steps {
                 input message: "Deploy to ${REMOTE_SERVER}?", ok: "Deploy"
 
-                sshagent(['moapms-ssh-key']) {
+                sshagent(['moapms2-ssh-key']) {
                     sh """
                     ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_SERVER} << 'EOF'
                         set -e
