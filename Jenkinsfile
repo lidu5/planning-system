@@ -1,6 +1,6 @@
 pipeline {
     /* ===================== AGENT ===================== */
-    agent { label 'builtin-linux' }   // ✅ FORCE Linux Built-in Node
+    agent { label 'builtin-linux' }   // Force Linux Built-in Node
 
     /* ===================== ENV ===================== */
     environment {
@@ -38,8 +38,7 @@ pipeline {
             steps {
                 dir('backend') {
                     sh '''
-                        pip install --upgrade pip
-                        pip install -r requirements.txt flake8
+                        pip install --no-cache-dir -r requirements.txt flake8
                         flake8 . || true
                     '''
                 }
@@ -56,8 +55,7 @@ pipeline {
             steps {
                 dir('backend') {
                     sh '''
-                        pip install --upgrade pip
-                        pip install -r requirements.txt
+                        pip install --no-cache-dir -r requirements.txt
                         python manage.py test --verbosity=2
                     '''
                 }
