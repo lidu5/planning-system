@@ -26,9 +26,9 @@ pipeline {
         stage('Lint Backend') {
             steps {
                 dir('backend') {
-                    bat '''
-                        python -m venv venv
-                        venv\\Scripts\\activate
+                    sh '''
+                        python3 -m venv venv
+                        source venv/bin/activate
                         pip install -r requirements.txt
                         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
                         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics || true
@@ -40,7 +40,7 @@ pipeline {
         stage('Lint Frontend') {
             steps {
                 dir('frontend/planning-vite') {
-                    bat '''
+                    sh '''
                         npm install
                         npm run lint || true
                     '''
@@ -51,9 +51,9 @@ pipeline {
         stage('Test Backend') {
             steps {
                 dir('backend') {
-                    bat '''
-                        python -m venv venv
-                        venv\\Scripts\\activate
+                    sh '''
+                        python3 -m venv venv
+                        source venv/bin/activate
                         pip install -r requirements.txt
                         python manage.py test --verbosity=2
                         python manage.py check --deploy
@@ -65,7 +65,7 @@ pipeline {
         stage('Test Frontend') {
             steps {
                 dir('frontend/planning-vite') {
-                    bat '''
+                    sh '''
                         npm install
                         npm run test -- --watchAll=false --coverage || true
                     '''
@@ -166,9 +166,9 @@ pipeline {
                     sleep 60
  
                     // Check application health
-                    bat '''
-                        curl -f http://%REMOTE_SERVER%:8080/health || exit 1
-                        curl -f http://%REMOTE_SERVER%:8080/api/ || exit 1
+                    sh '''
+                        curl -f http://${REMOTE_SERVER}:8080/health || exit 1
+                        curl -f http://${REMOTE_SERVER}:8080/api/ || exit 1
                         echo "Health checks passed!"
                     '''
                 }
@@ -182,7 +182,7 @@ pipeline {
             cleanWs()
  
             // Clean up Docker images
-            bat '''
+            sh '''
                 docker image prune -f || true
                 docker volume prune -f || true
             '''
