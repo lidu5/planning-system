@@ -1,6 +1,7 @@
 pipeline {
-    agent any
-
+    agent {
+        label 'builtin-linux'
+    }
     environment {
         PYTHON = 'python3'
         VENV_DIR = 'venv'
