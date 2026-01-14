@@ -11,7 +11,7 @@ RUN npm ci
 
 # Copy source and build
 COPY . .
-RUN npm run build
+RUN chmod +x node_modules/.bin/* && npm run build
 
 # --- Production stage ---
 FROM nginx:1.27-alpine AS production
