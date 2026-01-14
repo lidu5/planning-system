@@ -77,9 +77,9 @@ pipeline {
                 }
             }
             steps {
-                dir('backend') {
+                dir('backend/moa_agriplan_system') {
                     sh '''
-                        pip install -r requirements.txt --no-cache-dir
+                        pip install -r ../requirements.txt --no-cache-dir
                         python manage.py test --verbosity=2
                         python manage.py check --deploy
                     '''
