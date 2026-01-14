@@ -1,24 +1,28 @@
 pipeline {
-    agent any   // ✅ no hard dependency on missing label
+    /* ===================== AGENT ===================== */
+    agent { label 'builtin-linux' }   // ✅ FORCE Linux Built-in Node
 
+    /* ===================== ENV ===================== */
     environment {
-        DOCKER_IMAGE_BACKEND = 'moa-agriplan-backend'
+        DOCKER_IMAGE_BACKEND  = 'moa-agriplan-backend'
         DOCKER_IMAGE_FRONTEND = 'moa-agriplan-frontend'
         DOCKER_TAG = "${BUILD_NUMBER}"
 
         REMOTE_SERVER = '10.10.20.233'
-        REMOTE_USER = 'moapms'
-        REMOTE_PATH = '/home/moapms/moa-planning-system'
+        REMOTE_USER   = 'moapms'
+        REMOTE_PATH   = '/home/moapms/moa-planning-system'
 
         DJANGO_SETTINGS_MODULE = 'moa_agriplan_system.settings'
         PYTHONUNBUFFERED = '1'
     }
 
+    /* ===================== STAGES ===================== */
     stages {
 
+        /* ---------- CHECKOUT ---------- */
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/lidu5/planning-system.git'
+                checkout scm
             }
         }
 
@@ -26,7 +30,10 @@ pipeline {
 
         stage('Lint Backend') {
             agent {
-                docker { image 'python:3.11' }
+                docker {
+                    image 'python:3.11'
+                    reuseNode true
+                }
             }
             steps {
                 dir('backend') {
@@ -41,7 +48,10 @@ pipeline {
 
         stage('Test Backend') {
             agent {
-                docker { image 'python:3.11' }
+                docker {
+                    image 'python:3.11'
+                    reuseNode true
+                }
             }
             steps {
                 dir('backend') {
@@ -58,7 +68,10 @@ pipeline {
 
         stage('Lint Frontend') {
             agent {
-                docker { image 'node:18' }
+                docker {
+                    image 'node:18'
+                    reuseNode true
+                }
             }
             steps {
                 dir('frontend/planning-vite') {
@@ -72,7 +85,10 @@ pipeline {
 
         stage('Test Frontend') {
             agent {
-                docker { image 'node:18' }
+                docker {
+                    image 'node:18'
+                    reuseNode true
+                }
             }
             steps {
                 dir('frontend/planning-vite') {
@@ -133,8 +149,8 @@ pipeline {
                             git pull origin main
                         fi
 
-                        docker-compose -f docker-compose.prod.yml down
-                        docker-compose -f docker-compose.prod.yml up -d --build
+                        docker compose -f docker-compose.prod.yml down
+                        docker compose -f docker-compose.prod.yml up -d --build
 
                         docker exec moa-backend-prod python manage.py migrate --noinput
                         docker exec moa-backend-prod python manage.py collectstatic --noinput
@@ -144,18 +160,21 @@ pipeline {
             }
         }
 
+        /* ===================== HEALTH CHECK ===================== */
+
         stage('Health Check') {
             when { branch 'main' }
             steps {
                 sh '''
                     sleep 30
-                    curl -f http://${REMOTE_SERVER}:8080 || exit 1
+                    curl -f http://${REMOTE_SERVER}:8080
                     echo "✅ Health check passed"
                 '''
             }
         }
     }
 
+    /* ===================== POST ===================== */
     post {
         always {
             cleanWs()
