@@ -24,12 +24,19 @@ pipeline {
         }
  
         stage('Lint Backend') {
+            agent {
+                docker {
+                    image 'python:3.11'
+                    args '-v $WORKSPACE:/app'
+                }
+            }
             steps {
                 dir('backend') {
                     sh '''
-                        python3 -m venv venv
-                        source venv/bin/activate
+                        cd /app
+                        pip install --upgrade pip
                         pip install -r requirements.txt
+                        pip install flake8
                         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
                         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics || true
                     '''
@@ -49,11 +56,17 @@ pipeline {
         }
  
         stage('Test Backend') {
+            agent {
+                docker {
+                    image 'python:3.11'
+                    args '-v $WORKSPACE:/app'
+                }
+            }
             steps {
                 dir('backend') {
                     sh '''
-                        python3 -m venv venv
-                        source venv/bin/activate
+                        cd /app
+                        pip install --upgrade pip
                         pip install -r requirements.txt
                         python manage.py test --verbosity=2
                         python manage.py check --deploy
