@@ -124,9 +124,6 @@ pipeline {
 
         /* ================= DEPLOY ================= */
         stage('Deploy to Production') {
-            when {
-                branch 'main'
-            }
             steps {
                 input message: "Deploy to ${REMOTE_SERVER}?", ok: "Deploy"
 
@@ -168,9 +165,6 @@ pipeline {
 
         /* ================= HEALTH CHECK ================= */
         stage('Health Check') {
-            when {
-                branch 'main'
-            }
             steps {
                 sh '''
                     sleep 20
