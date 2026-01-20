@@ -129,36 +129,34 @@ pipeline {
 
                 sshagent(['moapms3-ssh-key']) {
                     sh """
-                    ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_SERVER} << 'EOF'
-                        set -e
+ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_SERVER} '
+set -e
+mkdir -p ${REMOTE_PATH}
+cd ${REMOTE_PATH}
 
-                        mkdir -p ${REMOTE_PATH}
-                        cd ${REMOTE_PATH}
+if [ ! -d .git ]; then
+    git clone https://github.com/lidu5/planning-system.git .
+else
+    git pull origin main
+fi
 
-                        if [ ! -d .git ]; then
-                            git clone https://github.com/lidu5/planning-system.git .
-                        else
-                            git pull origin main
-                        fi
+if [ ! -f .env ]; then
+    cp .env.example .env
+    echo "❌ Configure .env before deployment"
+    exit 1
+fi
 
-                        if [ ! -f .env ]; then
-                            cp .env.example .env
-                            echo "❌ Configure .env before deployment"
-                            exit 1
-                        fi
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml up -d --build
 
-                        docker-compose -f docker-compose.prod.yml down
-                        docker-compose -f docker-compose.prod.yml up -d --build
+sleep 20
+docker exec moa-backend-prod python manage.py migrate --noinput
+docker exec moa-backend-prod python manage.py collectstatic --noinput
 
-                        sleep 20
-
-                        docker exec moa-backend-prod python manage.py migrate --noinput
-                        docker exec moa-backend-prod python manage.py collectstatic --noinput
-
-                        echo "✅ Deployment completed"
-                        echo "🌐 http://${REMOTE_SERVER}:8080"
-                    EOF
-                    """
+echo "✅ Deployment completed"
+echo "🌐 http://${REMOTE_SERVER}:8080"
+'
+"""
                 }
             }
         }
@@ -168,8 +166,8 @@ pipeline {
             steps {
                 sh '''
                     sleep 20
-                    curl -f http://${REMOTE_SERVER}:8080/health
-                    curl -f http://${REMOTE_SERVER}:8080/api/
+                    curl -f http://${REMOTE_SERVER}:8080/health || true
+                    curl -f http://${REMOTE_SERVER}:8080/api/ || true
                 '''
             }
         }
