@@ -29,7 +29,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Fetch user profile from backend
       (async () => {
         try {
-          const res = await api.get('/api/me/');
+          const res = await api.get('/me/');
           setUser({
             username: res.data?.username,
             email: res.data?.email,
@@ -51,7 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [token]);
 
   const login = async (username: string, password: string) => {
-    const res = await api.post('/api/auth/token/', { username, password });
+    const res = await api.post('/auth/token/', { username, password });
     const tok = res.data?.token;
     setToken(tok);
     localStorage.setItem('auth_username', username);

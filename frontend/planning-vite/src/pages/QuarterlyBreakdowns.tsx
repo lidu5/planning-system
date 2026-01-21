@@ -70,10 +70,10 @@ export default function QuarterlyBreakdowns() {
     try {
       const gregYear = toGregorianYearFromEthiopian(year);
       const [plansRes, bRes, pRes, winRes] = await Promise.all([
-        api.get('/api/annual-plans/', { params: { year: gregYear } }),
-        api.get('/api/breakdowns/'),
-        showPerformance ? api.get('/api/performances/') : Promise.resolve({ data: [] }),
-        api.get('/api/submission-windows/status/', { params: { year: gregYear } }),
+        api.post('/annual-plans/', { params: { year: gregYear } }),
+        api.get('/breakdowns/'),
+        showPerformance ? api.get('/performances/') : Promise.resolve({ data: [] }),
+        api.get('/submission-windows/status/', { params: { year: gregYear } }),
       ]);
       const all: AnnualPlan[] = plansRes.data || [];
       setAllPlans(all);
@@ -224,7 +224,7 @@ export default function QuarterlyBreakdowns() {
 
   const ensureCreate = async (planId: number) => {
     if (breakdowns[planId]?.id) return breakdowns[planId];
-    const res = await api.post('/api/breakdowns/', { plan: planId, q1: '0', q2: '0', q3: '0', q4: '0' });
+    const res = await api.post('/breakdowns/', { plan: planId, q1: '0', q2: '0', q3: '0', q4: '0' });
     const created: Breakdown = res.data;
     setBreakdowns((prev) => ({ ...prev, [planId]: created }));
     return created;
@@ -234,7 +234,7 @@ export default function QuarterlyBreakdowns() {
     try {
       const bd = await ensureCreate(planId);
       const current = breakdowns[planId] || bd;
-      await api.put(`/api/breakdowns/${bd.id}/`, {
+      await api.put(`/breakdowns/${bd.id}/`, {
         plan: planId,
         q1: (overrides && overrides.q1 !== undefined ? overrides.q1 : (current?.q1 ?? '0')),
         q2: (overrides && overrides.q2 !== undefined ? overrides.q2 : (current?.q2 ?? '0')),
@@ -261,7 +261,7 @@ export default function QuarterlyBreakdowns() {
   const submitPlan = async (planId: number) => {
     try {
       const bd = await ensureCreate(planId);
-      await api.post(`/api/breakdowns/${bd.id}/submit/`);
+      await api.post(`/breakdowns/${bd.id}/submit/`);
       await loadData();
       setSuccess('Quarterly plan submitted for review');
       setTimeout(() => setSuccess(null), 3000);
