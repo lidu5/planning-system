@@ -51,7 +51,7 @@ export default api;
 // Function to get CSRF token from Django
 export const getCSRFToken = async () => {
   try {
-    await api.get('/');
+    await api.get('/api/');
     return getCookie('csrftoken');
   } catch (error) {
     console.error('Failed to get CSRF token:', error);
