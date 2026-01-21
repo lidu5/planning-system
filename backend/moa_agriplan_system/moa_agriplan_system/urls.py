@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.http import HttpResponse, JsonResponse
 from rest_framework.routers import DefaultRouter
 from rest_framework.authtoken.views import obtain_auth_token
 from indicators.views import SectorViewSet, DepartmentViewSet, IndicatorViewSet, IndicatorGroupViewSet
@@ -33,6 +34,13 @@ from plans.views import (
     submit_to_strategic,
     minister_review_summary,
 )
+
+# Health check views
+def health_check(request):
+    return HttpResponse(status=200)
+
+def api_check(request):
+    return JsonResponse({'status': 'ok'})
 
 router = DefaultRouter()
 router.register(r'api/sectors', SectorViewSet, basename='sector')
@@ -62,6 +70,8 @@ urlpatterns = [
     path('api/submission-windows/status/', submission_window_status, name='api-submission-window-status'),
     path('api/reviews/summary/', minister_review_summary, name='api-minister-review-summary'),
     path('api/reviews/submit-to-strategic/', submit_to_strategic, name='api-submit-to-strategic'),
+    path('health/', health_check, name='health'),
+    path('api/', api_check, name='api-check'),
     path('', include(router.urls)),
 ]
 

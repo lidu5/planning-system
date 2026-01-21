@@ -157,7 +157,7 @@ pipeline {
 
                         echo "✅ Deployment completed"
                         echo "🌐 http://${REMOTE_SERVER}:8080"
-                    EOF
+EOF
                     """
                 }
             }
