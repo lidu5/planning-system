@@ -20,15 +20,6 @@ api.interceptors.request.use((config) => {
     config.headers['Authorization'] = `Token ${token}`;
   }
   
-  // Add CSRF token for POST/PUT/DELETE requests
-  if (['post', 'put', 'patch', 'delete'].includes(config.method?.toLowerCase() || '')) {
-    const csrfToken = getCookie('csrftoken');
-    if (csrfToken) {
-      config.headers = config.headers || {};
-      config.headers['X-CSRFToken'] = csrfToken;
-    }
-  }
-  
   return config;
 });
 

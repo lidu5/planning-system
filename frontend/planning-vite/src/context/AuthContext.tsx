@@ -52,9 +52,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (username: string, password: string) => {
     try {
-      // Get CSRF token first
-      await api.get('/api/');
-      
       const res = await api.post('/api/auth/token/', { username, password });
       const tok = res.data?.token;
       setToken(tok);
