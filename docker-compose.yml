@@ -22,8 +22,8 @@ services:
       timeout: 10s
       retries: 3
 
-  frontend:
-    build:
+  frontend:8
+    build:2
       context: ./frontend/planning-vite
       dockerfile: Dockerfile
       args:
@@ -36,3 +36,7 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+
+
+
+        
