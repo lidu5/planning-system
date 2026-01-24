@@ -387,12 +387,11 @@ class QuarterlyBreakdownViewSet(viewsets.ModelViewSet):
         return qs
 
     def _allow_plan_edit(self, request):
-        role = getattr(request.user, 'role', '')
-        # Lead Executive Body encodes (creates/updates) quarterly breakdowns.
-        # State Minister is also allowed to make edits on submitted/rejected plans
-        # that fall under their sector/department, while Advisors and others act
-        # as reviewers and cannot modify the record itself.
-        if role not in ['LEAD_EXECUTIVE_BODY', 'STATE_MINISTER']:
+        role = getattr(request.user, 'role', '').upper()
+        # Only Lead Executive Body encodes (creates/updates) quarterly breakdowns.
+        # Other roles, including State Minister and Advisors, are read-only for
+        # the underlying records and may only review or approve.
+        if role != 'LEAD_EXECUTIVE_BODY':
             return False
         return True
 

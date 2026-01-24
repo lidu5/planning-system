@@ -70,7 +70,8 @@ export default function QuarterlyBreakdowns() {
     try {
       const gregYear = toGregorianYearFromEthiopian(year);
       const [plansRes, bRes, pRes, winRes] = await Promise.all([
-        api.post('/api/annual-plans/', { params: { year: gregYear } }),
+        // Fetch annual plans for the selected year via GET with query params
+        api.get('/api/annual-plans/', { params: { year: gregYear } }),
         api.get('/api/breakdowns/'),
         showPerformance ? api.get('/api/performances/') : Promise.resolve({ data: [] }),
         api.get('/api/submission-windows/status/', { params: { year: gregYear } }),
