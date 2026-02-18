@@ -417,7 +417,7 @@ export default function FinalApprovals() {
         )}
 
         {/* Main Content */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 ">
           {/* Breakdowns Card */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden">
             <div className="px-6 py-4 bg-gradient-to-r from-blue-50 to-blue-100 border-b">

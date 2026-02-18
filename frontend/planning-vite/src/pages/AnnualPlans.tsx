@@ -16,7 +16,6 @@ import {
   ChevronRight, 
   ChevronDown,
   BarChart3,
-  TrendingUp,
   Download,
   Search,
   CheckCircle,
@@ -26,7 +25,24 @@ import {
 
 type Sector = { id: number; name: string };
 type Department = { id: number; name: string; sector: Sector };
-type Indicator = { id: number; name: string; department?: Department };
+type Indicator = { 
+  id: number; 
+  name: string; 
+  department?: Department; 
+  groups?: Array<{
+    id: number;
+    name: string;
+    hierarchy_path?: string;
+    level?: number;
+  }>;
+  hierarchy_context?: {
+    group_id: number;
+    group_name: string;
+    hierarchy_path: string;
+    level: number;
+    unit?: string;
+  };
+};
 type AnnualPlan = {
   id: number;
   year: number;
@@ -48,6 +64,26 @@ export default function AnnualPlans() {
   const thisYear = getCurrentEthiopianDate()[0];
   const toGregorianYearFromEthiopian = (etYear: number) => etYear + 7;
   const toEthiopianYearFromGregorian = (grYear: number) => grYear - 7;
+
+  // Helper function to format indicator display name with group context
+  const formatIndicatorDisplayName = (indicator: Indicator): string => {
+    // If indicator has hierarchy context, use it
+    if (indicator.hierarchy_context) {
+      const ctx = indicator.hierarchy_context;
+      return `${indicator.name} (${ctx.hierarchy_path})`;
+    }
+    
+    // If indicator has groups, show the first group's hierarchy path
+    if (indicator.groups && indicator.groups.length > 0) {
+      const group = indicator.groups[0];
+      const path = group.hierarchy_path || group.name;
+      return `${indicator.name} (${path})`;
+    }
+    
+    // Fallback to just the name
+    return indicator.name;
+  };
+
   const [plans, setPlans] = useState<AnnualPlan[]>([]);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -754,7 +790,7 @@ export default function AnnualPlans() {
                   >
                     <option value="">Select indicator</option>
                     {indicators.map((i) => (
-                      <option key={i.id} value={i.id}>{i.name}</option>
+                      <option key={i.id} value={i.id}>{formatIndicatorDisplayName(i)}</option>
                     ))}
                   </select>
                 </div>

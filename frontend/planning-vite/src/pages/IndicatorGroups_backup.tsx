@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import type { IndicatorGroup, Department, Sector } from '../types/indicator';
 import { 
   Layers, 
   Building, 
@@ -22,6 +21,22 @@ import {
   BarChart3
 } from 'lucide-react';
 
+type Sector = { id: number; name: string };
+type Department = { id: number; name: string; sector?: Sector };
+type IndicatorGroup = { 
+  id: number; 
+  name: string; 
+  department: Department;
+  parent?: { id: number; name: string } | null;
+  parent_id?: number | null;
+  unit?: string;
+  children?: Array<{ id: number; name: string; level: number }>;
+  level: number;
+  hierarchy_path: string;
+  is_parent: boolean;
+  inherited_unit: string;
+};
+
 export default function IndicatorGroups() {
   const { user } = useAuth();
   const isSuperuser = !!user?.is_superuser;
@@ -36,6 +51,7 @@ export default function IndicatorGroups() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  
   const [showForm, setShowForm] = useState(false);
 
   const loadDepartments = async () => {
@@ -82,7 +98,7 @@ export default function IndicatorGroups() {
         name, 
         department_id: departmentId,
         unit: unit || undefined,
-        parent_id: parentId || null
+        parent_id: parentId || undefined
       } as any;
       if (editing) {
         await api.put(`/api/indicator-groups/${editing.id}/`, payload);
@@ -372,43 +388,6 @@ export default function IndicatorGroups() {
                     placeholder="e.g., Tons, Number, Percentage"
                   />
                   <p className="text-xs text-gray-500 mt-1">Unit for this group and its indicators (optional)</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Layers className="inline w-4 h-4 mr-1" />
-                    Parent Group
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={parentId || ''}
-                      onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : null)}
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 appearance-none bg-white"
-                    >
-                      <option value="">No Parent (Root Level)</option>
-                      {groups
-                        .filter(g => (!departmentId || g.department?.id === departmentId) && g.id !== editing?.id)
-                        .map((g) => (
-                          <option key={g.id} value={g.id}>
-                            {g.hierarchy_path}
-                          </option>
-                        ))}
-                    </select>
-                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
-                      <ChevronDown className="w-4 h-4 text-gray-400" />
-                    </div>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {departmentId 
-                      ? 'Select a parent group to create hierarchy (optional)' 
-                      : 'Select a department first to see available parent groups'
-                    }
-                  </p>
-                </div>
-              </div>
-
-              {error && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-                  <div className="flex items-center gap-2">
                     <AlertCircle className="w-5 h-5 text-red-500" />
                     <p className="text-sm text-red-600">{error}</p>
                   </div>
@@ -515,8 +494,6 @@ export default function IndicatorGroups() {
                           </div>
                           <div>
                             <p className="font-medium text-gray-900">{g.name}</p>
-                            {g.unit && <p className="text-xs text-gray-500">Unit: {g.unit}</p>}
-                            {g.parent && <p className="text-xs text-gray-500">Parent: {g.parent.name}</p>}
                           </div>
                         </div>
                       </td>
@@ -602,24 +579,6 @@ export default function IndicatorGroups() {
                           </div>
                         </div>
                       </div>
-                      {isSuperuser && (
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => onEdit(g)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors duration-200"
-                            title="Edit group"
-                          >
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => onDelete(g)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors duration-200"
-                            title="Delete group"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
                     </div>
 
                     <div className="space-y-2 text-sm">
@@ -633,25 +592,67 @@ export default function IndicatorGroups() {
                           <span className="text-gray-700">Sector: {g.department.sector.name}</span>
                         </div>
                       )}
-                      {g.unit && (
-                        <div className="flex items-center gap-2">
-                          <Hash className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                          <span className="text-gray-700">Unit: {g.unit}</span>
-                        </div>
-                      )}
-                      {g.parent && (
-                        <div className="flex items-center gap-2">
-                          <Layers className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                          <span className="text-gray-700">Parent: {g.parent.name}</span>
-                        </div>
-                      )}
                     </div>
+
+                    {isSuperuser && (
+                      <div className="flex gap-2 mt-4 pt-3 border-t border-gray-200">
+                        <button
+                          onClick={() => onEdit(g)}
+                          className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors duration-200"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => onDelete(g)}
+                          className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors duration-200"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          Delete
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             )}
           </div>
         </div>
+
+        {/* Distribution Summary */}
+        {groups.length > 0 && (
+          <div className="mt-8 bg-white rounded-2xl border border-gray-200 shadow-lg p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Group Distribution by Department</h3>
+            <div className="space-y-4">
+              {departments
+                .filter(dept => groupCountByDepartment[dept.id] > 0)
+                .map((dept) => {
+                  const count = groupCountByDepartment[dept.id] || 0;
+                  const percentage = groups.length > 0 ? (count / groups.length) * 100 : 0;
+                  
+                  return (
+                    <div key={dept.id} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Building className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm font-medium text-gray-700">{dept.name}</span>
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          {count} group{count !== 1 ? 's' : ''} ({percentage.toFixed(1)}%)
+                        </div>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div 
+                          className="bg-purple-600 h-2 rounded-full transition-all duration-500"
+                          style={{ width: `${percentage}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
