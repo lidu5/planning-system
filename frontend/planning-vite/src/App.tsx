@@ -22,6 +22,7 @@ import Validations from './pages/Validations'
 import EntryPeriods from './pages/EntryPeriods'
 import FinalApprovals from './pages/FinalApprovals'
 import MinisterView from './pages/MinisterView'
+import StateMinisterDashboard from './pages/StateMinisterDashboard'
 import ActivityLogs from './pages/ActivityLogs'
 import ProfilePage from './pages/Profile'
 import AdvisorCommentSubmit from './pages/AdvisorCommentSubmit'
@@ -199,6 +200,36 @@ function App() {
               <MinisterView />
             </DashboardLayout>
           </MinisterRoute>
+        }
+      />
+      <Route
+        path="/executive-minister-view"
+        element={
+          <ExecutiveRoute>
+            <DashboardLayout>
+              <MinisterView />
+            </DashboardLayout>
+          </ExecutiveRoute>
+        }
+      />
+      <Route
+        path="/strategic-minister-view"
+        element={
+          <StrategicStaffRoute>
+            <DashboardLayout>
+              <MinisterView />
+            </DashboardLayout>
+          </StrategicStaffRoute>
+        }
+      />
+      <Route
+        path="/state-minister-dashboard"
+        element={
+          <StateMinisterRoute>
+            <DashboardLayout>
+              <StateMinisterDashboard />
+            </DashboardLayout>
+          </StateMinisterRoute>
         }
       />
       <Route

@@ -63,6 +63,12 @@ const MenuIcon = ({ name, active }: { name: string; active?: boolean }) => {
           <path d="M4 19h16v2H4v-2Zm2-8h3v6H6v-6Zm5-4h3v10h-3V7Zm5 2h3v8h-3V9Z"/>
         </svg>
       );
+    case 'State Minister Dashboard':
+      return (
+        <svg className={`w-5 h-5 ${color}`} fill="currentColor" viewBox="0 0 24 24">
+          <path d="M3 13h8V3H3v10Zm0 8h8v-6H3v6Zm10-8h8V3h-8v10Zm0 8h8v-6h-8v6Z"/>
+        </svg>
+      );
     case 'Reviews & Approvals':
       return (
         <svg className={`w-5 h-5 ${color}`} fill="currentColor" viewBox="0 0 24 24">
@@ -85,6 +91,12 @@ const MenuIcon = ({ name, active }: { name: string; active?: boolean }) => {
       return (
         <svg className={`w-5 h-5 ${color}`} fill="currentColor" viewBox="0 0 24 24">
           <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+        </svg>
+      );
+    case 'Minister View':
+      return (
+        <svg className={`w-5 h-5 ${color}`} fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
         </svg>
       );
     default:
@@ -184,16 +196,17 @@ export default function DashboardLayout({ children }: PropsWithChildren) {
       { label: 'Advisor Comments', to: '/advisor-comments' },
     ];
     const ministerMenus = [
-      // { label: 'Quarterly Breakdown', to: '/quarterly-breakdowns' },
-      // { label: 'Quarterly Performance', to: '/performances' },
+      { label: 'State Minister Dashboard', to: '/state-minister-dashboard' },
       { label: 'Reviews & Approvals', to: '/reviews' },
       { label: 'Advisor Comments', to: '/advisor-comments' },
     ];
     const strategicMenus = [
       { label: 'Validations', to: '/validations' },
+      { label: 'Minister View', to: '/strategic-minister-view' },
     ];
     const executiveMenus = [
       { label: 'Final Approvals', to: '/final-approvals' },
+      { label: 'Minister View', to: '/executive-minister-view' },
     ];
     const ministerViewMenus = [
       { label: 'Final Approved', to: '/minister-view' },
