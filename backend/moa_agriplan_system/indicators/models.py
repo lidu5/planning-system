@@ -23,12 +23,136 @@ class Department(models.Model):
 class IndicatorGroup(models.Model):
     name = models.CharField(max_length=255)
     department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name='indicator_groups')
+    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='children')
+    unit = models.CharField(max_length=64, blank=True, help_text="Unit of measurement for this group and its indicators")
 
     class Meta:
-        unique_together = ('name', 'department')
+        unique_together = ('name', 'department', 'parent')
 
     def __str__(self):
-        return f"{self.name} ({self.department.name})"
+        parent_name = f" ({self.parent.name})" if self.parent else ""
+        return f"{self.name}{parent_name} ({self.department.name})"
+
+    @property
+    def level(self):
+        """Return the hierarchy level (0 for root, 1 for children, etc.)"""
+        level = 0
+        current = self.parent
+        while current:
+            level += 1
+            current = current.parent
+        return level
+
+    @property
+    def is_parent(self):
+        """Check if this group has children"""
+        return self.children.exists()
+
+    @property
+    def hierarchy_path(self):
+        """Get the full hierarchy path as a string"""
+        path = [self.name]
+        current = self.parent
+        while current:
+            path.append(current.name)
+            current = current.parent
+        return " > ".join(reversed(path))
+
+    def get_all_children(self):
+        """Get all descendant groups recursively"""
+        children = list(self.children.all())
+        all_children = children.copy()
+        for child in children:
+            all_children.extend(child.get_all_children())
+        return all_children
+
+    def get_inherited_unit(self):
+        """Get the unit from this group or nearest parent that has a unit"""
+        if self.unit:
+            return self.unit
+        if self.parent:
+            return self.parent.get_inherited_unit()
+        return ''
+
+    def get_annual_target_aggregate(self, year):
+        """Calculate aggregate annual target from all direct child indicators for a given year"""
+        from django.db.models import Sum
+        from plans.models import AnnualPlan
+        
+        # Get all indicators directly in this group
+        direct_indicators = self.indicators.all()
+        
+        # Get annual plans for these indicators in the given year
+        total = AnnualPlan.objects.filter(
+            indicator__in=direct_indicators,
+            year=year
+        ).aggregate(total=Sum('target'))['total'] or 0
+        
+        # Also add aggregates from child groups
+        child_groups = self.children.all()
+        for child_group in child_groups:
+            total += child_group.get_annual_target_aggregate(year)
+        
+        return total
+
+    def get_quarterly_breakdown_aggregate(self, year):
+        """Calculate aggregate quarterly breakdown from all direct child indicators for a given year"""
+        from django.db.models import Sum
+        from plans.models import AnnualPlan, QuarterlyBreakdown
+        
+        # Get all indicators directly in this group
+        direct_indicators = self.indicators.all()
+        
+        # Get quarterly breakdowns for these indicators in the given year
+        breakdowns = QuarterlyBreakdown.objects.filter(
+            plan__indicator__in=direct_indicators,
+            plan__year=year
+        ).aggregate(
+            q1=Sum('q1'),
+            q2=Sum('q2'),
+            q3=Sum('q3'),
+            q4=Sum('q4')
+        )
+        
+        result = {
+            'q1': breakdowns['q1'] or 0,
+            'q2': breakdowns['q2'] or 0,
+            'q3': breakdowns['q3'] or 0,
+            'q4': breakdowns['q4'] or 0
+        }
+        
+        # Also add aggregates from child groups
+        child_groups = self.children.all()
+        for child_group in child_groups:
+            child_breakdown = child_group.get_quarterly_breakdown_aggregate(year)
+            result['q1'] += child_breakdown['q1']
+            result['q2'] += child_breakdown['q2']
+            result['q3'] += child_breakdown['q3']
+            result['q4'] += child_breakdown['q4']
+        
+        return result
+
+    def get_performance_aggregate(self, year, quarter):
+        """Calculate aggregate performance from all direct child indicators for a given year and quarter"""
+        from django.db.models import Sum
+        from plans.models import QuarterlyPerformance
+        
+        # Get all indicators directly in this group
+        direct_indicators = self.indicators.all()
+        
+        # Get performance data for these indicators in the given year and quarter
+        total = QuarterlyPerformance.objects.filter(
+            plan__indicator__in=direct_indicators,
+            plan__year=year,
+            quarter=quarter
+        ).aggregate(total=Sum('value'))['total'] or 0
+        
+        # Also add aggregates from child groups
+        child_groups = self.children.all()
+        for child_group in child_groups:
+            total += child_group.get_performance_aggregate(year, quarter)
+        
+        return total
 
 
 class Indicator(models.Model):
@@ -39,7 +163,38 @@ class Indicator(models.Model):
     groups = models.ManyToManyField(IndicatorGroup, blank=True, related_name='indicators')
 
     class Meta:
-        unique_together = ('name', 'department')
+        # No unique constraint - allow same indicator names in different departments/groups
+        # This enables context-dependent indicators with same names
+        pass
 
     def __str__(self):
         return f"{self.name} ({self.department.name})"
+
+    def get_effective_unit(self):
+        """Get the unit from this indicator or inherit from primary group"""
+        if self.unit:
+            return self.unit
+        # Get unit from the first group if available
+        primary_group = self.groups.first()
+        if primary_group:
+            return primary_group.get_inherited_unit()
+        return ''
+
+    def get_hierarchy_context(self):
+        """Get hierarchy context for this indicator"""
+        primary_group = self.groups.first()
+        if primary_group:
+            return {
+                'group_id': primary_group.id,
+                'group_name': primary_group.name,
+                'hierarchy_path': primary_group.hierarchy_path,
+                'level': primary_group.level,
+                'unit': self.get_effective_unit()
+            }
+        return {
+            'group_id': None,
+            'group_name': None,
+            'hierarchy_path': None,
+            'level': None,
+            'unit': self.unit
+        }

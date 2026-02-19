@@ -158,7 +158,7 @@ REST_FRAMEWORK = {
 CORS_ALLOW_ALL_ORIGINS = True
 
 # CSRF Exemption for API
-CSRF_TRUSTED_ORIGINS = ['http://10.10.20.233:8080', 'http://localhost:3000', 'http://127.0.0.1:3000']
+CSRF_TRUSTED_ORIGINS = ['http://10.10.20.233:8080', 'http://196.188.248.104:8080', 'http://localhost:3000', 'http://127.0.0.1:3000']
 
 # Quarterly breakdown submission window (configurable via .env)
 # If BREAKDOWN_WINDOW_ALWAYS_OPEN is true, submission is allowed anytime.

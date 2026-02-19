@@ -24,10 +24,81 @@ class IndicatorGroupSerializer(serializers.ModelSerializer):
     department_id = serializers.PrimaryKeyRelatedField(
         queryset=Department.objects.all(), source='department', write_only=True
     )
+    parent = serializers.SerializerMethodField()
+    parent_id = serializers.PrimaryKeyRelatedField(
+        queryset=IndicatorGroup.objects.all(), source='parent', write_only=True, required=False, allow_null=True
+    )
+    children = serializers.SerializerMethodField()
+    level = serializers.SerializerMethodField()
+    hierarchy_path = serializers.SerializerMethodField()
+    is_parent = serializers.SerializerMethodField()
+    inherited_unit = serializers.SerializerMethodField()
+    annual_target_aggregate = serializers.SerializerMethodField()
+    quarterly_breakdown_aggregate = serializers.SerializerMethodField()
+    performance_aggregate = serializers.SerializerMethodField()
 
     class Meta:
         model = IndicatorGroup
-        fields = ['id', 'name', 'department', 'department_id']
+        fields = [
+            'id', 'name', 'department', 'department_id', 'parent', 'parent_id', 
+            'unit', 'children', 'level', 'hierarchy_path', 'is_parent', 'inherited_unit',
+            'annual_target_aggregate', 'quarterly_breakdown_aggregate', 'performance_aggregate'
+        ]
+
+    def get_parent(self, obj):
+        if obj.parent:
+            return {
+                'id': obj.parent.id,
+                'name': obj.parent.name
+            }
+        return None
+
+    def get_children(self, obj):
+        return [
+            {
+                'id': child.id,
+                'name': child.name,
+                'level': child.level
+            }
+            for child in obj.children.all()
+        ]
+
+    def get_level(self, obj):
+        return obj.level
+
+    def get_hierarchy_path(self, obj):
+        return obj.hierarchy_path
+
+    def get_is_parent(self, obj):
+        return obj.is_parent
+
+    def get_inherited_unit(self, obj):
+        return obj.get_inherited_unit()
+
+    def get_annual_target_aggregate(self, obj):
+        request = self.context.get('request')
+        if request and request.query_params.get('include_aggregates'):
+            year = request.query_params.get('year')
+            if year:
+                return obj.get_annual_target_aggregate(int(year))
+        return None
+
+    def get_quarterly_breakdown_aggregate(self, obj):
+        request = self.context.get('request')
+        if request and request.query_params.get('include_aggregates'):
+            year = request.query_params.get('year')
+            if year:
+                return obj.get_quarterly_breakdown_aggregate(int(year))
+        return None
+
+    def get_performance_aggregate(self, obj):
+        request = self.context.get('request')
+        if request and request.query_params.get('include_aggregates'):
+            year = request.query_params.get('year')
+            quarter = request.query_params.get('quarter')
+            if year and quarter:
+                return obj.get_performance_aggregate(int(year), int(quarter))
+        return None
 
 
 class IndicatorSerializer(serializers.ModelSerializer):
@@ -44,7 +115,15 @@ class IndicatorSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True
     )
+    effective_unit = serializers.ReadOnlyField()
+    hierarchy_context = serializers.SerializerMethodField()
 
     class Meta:
         model = Indicator
-        fields = ['id', 'name', 'unit', 'description', 'department', 'department_id', 'groups', 'group_ids']
+        fields = [
+            'id', 'name', 'unit', 'description', 'department', 'department_id', 
+            'groups', 'group_ids', 'effective_unit', 'hierarchy_context'
+        ]
+
+    def get_hierarchy_context(self, obj):
+        return obj.get_hierarchy_context()

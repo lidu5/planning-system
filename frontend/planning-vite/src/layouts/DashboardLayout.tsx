@@ -202,11 +202,11 @@ export default function DashboardLayout({ children }: PropsWithChildren) {
     ];
     const strategicMenus = [
       { label: 'Validations', to: '/validations' },
-      { label: 'Minister View', to: '/strategic-minister-view' },
+      { label: 'Overall Dashboard', to: '/strategic-minister-view' },
     ];
     const executiveMenus = [
       { label: 'Final Approvals', to: '/final-approvals' },
-      { label: 'Minister View', to: '/executive-minister-view' },
+      { label: 'Overall Dashboard', to: '/executive-minister-view' },
     ];
     const ministerViewMenus = [
       { label: 'Final Approved', to: '/minister-view' },
