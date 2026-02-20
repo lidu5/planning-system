@@ -30,23 +30,28 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    env_file:
+      - .env.production  # 👈 Use production environment file
     environment:
-      # Django settings
+      # Django settings - these override .env.production if needed
       - DEBUG=False
       - SECRET_KEY=${SECRET_KEY:-django-insecure-change-me-in-production}
-      - ALLOWED_HOSTS=localhost,127.0.0.1,10.10.20.233,backend,moa-backend-prod
+      # 👇 UPDATED: Added public IP to ALLOWED_HOSTS
+      - ALLOWED_HOSTS=localhost,127.0.0.1,10.10.20.233,196.188.248.104,backend,moa-backend-prod
       
-      # CORS settings
-      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://10.10.20.233:3000
+      # 👇 UPDATED: CORS settings with public IP
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://10.10.20.233:3000,http://10.10.20.233:8080,http://196.188.248.104:8080
       - CORS_ALLOW_ALL_ORIGINS=False
-      - CSRF_TRUSTED_ORIGINS=http://localhost:3000,http://10.10.20.233:3000,http://10.10.20.233:8000
       
-      # Database settings
+      # 👇 UPDATED: CSRF settings with public IP
+      - CSRF_TRUSTED_ORIGINS=http://localhost:3000,http://10.10.20.233:3000,http://10.10.20.233:8080,http://10.10.20.233:8000,http://196.188.248.104:8080,http://196.188.248.104:8000
+      
+      # Database settings - using Docker service name
       - DB_ENGINE=django.db.backends.postgresql
       - DB_NAME=planningmanagmentdb
       - DB_USER=postgres
-      - DB_PASSWORD=postgres
-      - DB_HOST=db
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}  # Uses env var or defaults to postgres
+      - DB_HOST=db  # 👈 This is the Docker service name, not localhost
       - DB_PORT=5432
       
       # Application settings
@@ -71,12 +76,14 @@ services:
       context: ./frontend/planning-vite
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=http://10.10.20.233:8000
+        # 👇 UPDATED: Changed from LAN IP to PUBLIC IP
+        - VITE_API_BASE_URL=http://196.188.248.104:8000
         - VITE_API_TIMEOUT=30000
     container_name: moa-frontend-prod
     restart: unless-stopped
     ports:
-      - "3000:80"
+      # 👇 UPDATED: Changed from 3000 to 8080 for public access
+      - "8080:80"
     depends_on:
       backend:
         condition: service_healthy
