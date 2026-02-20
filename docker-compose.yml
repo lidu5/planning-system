@@ -41,7 +41,7 @@ services:
       - CORS_ALLOW_ALL_ORIGINS=False
       - CSRF_TRUSTED_ORIGINS=http://localhost:3000,http://10.10.20.233:3000,http://10.10.20.233:8000
       
-      # Database settings - CRITICAL FIX
+      # Database settings
       - DB_ENGINE=django.db.backends.postgresql
       - DB_NAME=planningmanagmentdb
       - DB_USER=postgres
@@ -61,7 +61,7 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
       start_period: 40s
     networks:
       - moa-network
