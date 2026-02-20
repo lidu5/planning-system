@@ -50,7 +50,7 @@ services:
       - DB_ENGINE=django.db.backends.postgresql
       - DB_NAME=planningmanagmentdb
       - DB_USER=postgres
-      - DB_PASSWORD=${DB_PASSWORD:-postgres}  # Uses env var or defaults to postgres
+      - DB_PASSWORD=your-secure-database-password # Uses env var or defaults to postgres
       - DB_HOST=db  # 👈 This is the Docker service name, not localhost
       - DB_PORT=5432
       
