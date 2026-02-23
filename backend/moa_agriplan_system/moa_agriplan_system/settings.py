@@ -35,7 +35,7 @@ ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[
     'localhost',
     '127.0.0.1',
     '10.10.20.233',        # LAN IP
-    # '196.188.248.104',     # 👈 ADD THIS - Public IP
+    '196.188.248.104',     # 👈 ADD THIS - Public IP
     'backend',
     'moa-backend-prod',
 ])
@@ -171,8 +171,8 @@ CORS_ALLOWED_ORIGINS = [
     'http://127.0.0.1:3000',
     'http://10.10.20.233:3000',      # LAN frontend
     'http://10.10.20.233:8080',      # 👈 ADD THIS - LAN frontend on port 8080
-    # 'http://196.188.248.104:8080',
-    'http://localhost:5173', # 👈 ADD THIS - Public frontend
+    'http://196.188.248.104:8080', 
+     'http://localhost:5173', # 👈 ADD THIS - Public frontend
 ]
 
 # 👇 UPDATED: CSRF trusted origins
@@ -182,8 +182,8 @@ CSRF_TRUSTED_ORIGINS = [
     'http://10.10.20.233:3000',
     'http://10.10.20.233:8080',      # 👈 ADD THIS
     'http://10.10.20.233:8000',      # 👈 ADD THIS - LAN backend
-    # 'http://196.188.248.104:8080',   # 👈 ADD THIS - Public frontend
-    # 'http://196.188.248.104:8000', 
+    'http://196.188.248.104:8080',   # 👈 ADD THIS - Public frontend
+    'http://196.188.248.104:8000', 
      'http://localhost:5173'  # 👈 ADD THIS - Public backend
 ]
 
