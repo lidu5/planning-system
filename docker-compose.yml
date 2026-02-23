@@ -1,30 +1,6 @@
 version: "3.9"
 
 services:
-  db:
-    image: postgres:15
-    container_name: moa-db-prod
-    restart: unless-stopped
-    environment:
-      - POSTGRES_DB=moa_production           # 👈 CHANGED to match backend
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=your-secure-database-password  # 👈 CHANGED to match backend
-      - POSTGRES_HOST_AUTH_METHOD=md5
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5434:5432"  # 👈 CHANGED to avoid port conflict (5434 on host, 5432 in container)
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      moa-network:
-        aliases:
-          - db           # 👈 ADDED for 'db' alias
-          - db-prod      # 👈 KEPT for 'db-prod' alias
-
   backend:
     build:
       context: ./backend
@@ -33,68 +9,43 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    env_file:
-      - .env.production
     environment:
-      # Django settings
+      - DJANGO_SETTINGS_MODULE=moa_agriplan_system.settings
       - DEBUG=False
-      - SECRET_KEY=${SECRET_KEY:-django-insecure-change-me-in-production}
-      - ALLOWED_HOSTS=localhost,127.0.0.1,10.10.20.233,196.188.248.104,backend,moa-backend-prod
-      
-      # CORS settings
-      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://10.10.20.233:3000,http://10.10.20.233:8080,http://196.188.248.104:8080
-      - CORS_ALLOW_ALL_ORIGINS=False
-      
-      # CSRF settings
-      - CSRF_TRUSTED_ORIGINS=http://localhost:3000,http://10.10.20.233:3000,http://10.10.20.233:8080,http://10.10.20.233:8000,http://196.188.248.104:8080,http://196.188.248.104:8000
-      
-      # Database settings
       - DB_ENGINE=django.db.backends.postgresql
-      - DB_NAME=moa_production                # 👈 CORRECT
+      - DB_NAME=moa_production
       - DB_USER=postgres
-      - DB_PASSWORD=your-secure-database-password  # 👈 CORRECT
-      - DB_HOST=db-prod                        # 👈 Using db-prod (works)
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=db-prod
       - DB_PORT=5432
-      
-      # Application settings
-      - BREAKDOWN_WINDOW_ALWAYS_OPEN=false
-      - BREAKDOWN_WINDOW_START_MONTH=1
-      - BREAKDOWN_WINDOW_START_DAY=1
-      - BREAKDOWN_WINDOW_DURATION_DAYS=15
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
     depends_on:
-      db:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 40s
-    networks:
-      - moa-network
+      - db-prod
 
   frontend:
     build:
       context: ./frontend/planning-vite
       dockerfile: Dockerfile
-      args:
-        - VITE_API_BASE_URL=http://10.10.20.233:8000
-        - VITE_API_TIMEOUT=30000
     container_name: moa-frontend-prod
     restart: unless-stopped
     ports:
       - "8080:80"
     depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - moa-network
+      - backend
+
+  db-prod:
+    image: postgres:16-alpine
+    container_name: moa-db-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: moa_production
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
+    volumes:
+      - db_prod_data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
 
 volumes:
-  postgres_data:
-    name: moa-postgres-data
-
-networks:
-  moa-network:
-    name: moa-planning-network
-    driver: bridge
+  db_prod_data:
