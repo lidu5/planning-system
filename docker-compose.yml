@@ -78,7 +78,7 @@ services:
       context: ./frontend/planning-vite
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=http://196.188.248.104:8000,http://10.10.20.233:8000
+        - VITE_API_BASE_URL=http://10.10.20.233:8000
         - VITE_API_TIMEOUT=30000
     container_name: moa-frontend-prod
     restart: unless-stopped
