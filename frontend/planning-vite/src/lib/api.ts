@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { toUserMessage } from './error';
+import { API_BASE_URL } from '../config/api';
 
 // Helper function to get cookies
 function getCookie(name: string): string | null {
@@ -10,7 +11,7 @@ function getCookie(name: string): string | null {
 }
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
+  baseURL: API_BASE_URL,
 });
 
 api.interceptors.request.use((config) => {
