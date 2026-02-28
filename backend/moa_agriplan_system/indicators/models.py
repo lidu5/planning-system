@@ -22,16 +22,28 @@ class Department(models.Model):
 
 class IndicatorGroup(models.Model):
     name = models.CharField(max_length=255)
-    department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name='indicator_groups')
+    department = models.ForeignKey(Department, on_delete=models.CASCADE, null=True, blank=True, related_name='indicator_groups')
+    sector = models.ForeignKey(StateMinisterSector, on_delete=models.CASCADE, null=True, blank=True, related_name='sector_indicator_groups')
     parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='children')
     unit = models.CharField(max_length=64, blank=True, help_text="Unit of measurement for this group and its indicators")
 
     class Meta:
-        unique_together = ('name', 'department', 'parent')
+        constraints = [
+            models.UniqueConstraint(fields=['name', 'department', 'parent'], name='unique_group_department'),
+            models.UniqueConstraint(fields=['name', 'sector', 'parent'], name='unique_group_sector'),
+            models.CheckConstraint(
+                check=models.Q(department__isnull=False) | models.Q(sector__isnull=False),
+                name='group_must_have_department_or_sector'
+            )
+        ]
 
     def __str__(self):
         parent_name = f" ({self.parent.name})" if self.parent else ""
-        return f"{self.name}{parent_name} ({self.department.name})"
+        if self.department:
+            return f"{self.name}{parent_name} ({self.department.name})"
+        elif self.sector:
+            return f"{self.name}{parent_name} ({self.sector.name})"
+        return f"{self.name}{parent_name} (No Department/Sector)"
 
     @property
     def level(self):
@@ -80,7 +92,7 @@ class IndicatorGroup(models.Model):
         from plans.models import AnnualPlan
         
         # Get all indicators directly in this group
-        direct_indicators = self.indicators.all()
+        direct_indicators = self.indicators.filter(is_aggregatable=True)
         
         # Get annual plans for these indicators in the given year
         total = AnnualPlan.objects.filter(
@@ -101,7 +113,7 @@ class IndicatorGroup(models.Model):
         from plans.models import AnnualPlan, QuarterlyBreakdown
         
         # Get all indicators directly in this group
-        direct_indicators = self.indicators.all()
+        direct_indicators = self.indicators.filter(is_aggregatable=True)
         
         # Get quarterly breakdowns for these indicators in the given year
         breakdowns = QuarterlyBreakdown.objects.filter(
@@ -138,7 +150,7 @@ class IndicatorGroup(models.Model):
         from plans.models import QuarterlyPerformance
         
         # Get all indicators directly in this group
-        direct_indicators = self.indicators.all()
+        direct_indicators = self.indicators.filter(is_aggregatable=True)
         
         # Get performance data for these indicators in the given year and quarter
         total = QuarterlyPerformance.objects.filter(
@@ -161,6 +173,10 @@ class Indicator(models.Model):
     description = models.TextField(blank=True)
     department = models.ForeignKey(Department, on_delete=models.CASCADE, related_name='indicators')
     groups = models.ManyToManyField(IndicatorGroup, blank=True, related_name='indicators')
+    is_aggregatable = models.BooleanField(
+        default=True,
+        help_text="Whether this indicator's value should be included in parent group calculations"
+    )
 
     class Meta:
         # No unique constraint - allow same indicator names in different departments/groups

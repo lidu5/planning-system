@@ -14,6 +14,27 @@ class SuperuserWritePermission(permissions.BasePermission):
             return bool(request.user and request.user.is_authenticated)
         return bool(request.user and request.user.is_authenticated and request.user.is_superuser)
 
+class IndicatorGroupWritePermission(permissions.BasePermission):
+    def has_permission(self, request, view):
+        # Read for authenticated users; write for superusers and state ministers within their sector
+        if request.method in permissions.SAFE_METHODS:
+            return bool(request.user and request.user.is_authenticated)
+        
+        if not request.user or not request.user.is_authenticated:
+            return False
+            
+        # Superusers can always write
+        if getattr(request.user, 'is_superuser', False):
+            return True
+            
+        # State ministers can write within their sector
+        role = getattr(request.user, 'role', '').upper()
+        if role == 'STATE_MINISTER':
+            user_sector_id = getattr(getattr(request.user, 'sector', None), 'id', None) or getattr(request.user, 'sector', None)
+            return bool(user_sector_id)
+            
+        return False
+
 class SectorViewSet(viewsets.ModelViewSet):
     queryset = StateMinisterSector.objects.all().order_by('name')
     serializer_class = StateMinisterSectorSerializer
@@ -37,23 +58,30 @@ class SectorViewSet(viewsets.ModelViewSet):
         return qs
 
 class IndicatorGroupViewSet(viewsets.ModelViewSet):
-    queryset = IndicatorGroup.objects.select_related('department', 'department__sector').all().order_by('name')
+    queryset = IndicatorGroup.objects.select_related('department', 'department__sector', 'sector').all().order_by('name')
     serializer_class = IndicatorGroupSerializer
-    permission_classes = [SuperuserWritePermission]
+    permission_classes = [IndicatorGroupWritePermission]
 
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
         department_id = self.request.query_params.get('department')
+        sector_id = self.request.query_params.get('sector')
+        
         if department_id:
             qs = qs.filter(department_id=department_id)
+        elif sector_id:
+            qs = qs.filter(sector_id=sector_id)
+            
         if getattr(user, 'is_superuser', False):
             return qs
         role = getattr(user, 'role', '').upper()
         if role == 'STATE_MINISTER':
             s_id = getattr(getattr(user, 'sector', None), 'id', None) or getattr(user, 'sector', None)
             if s_id:
-                qs = qs.filter(department__sector_id=s_id)
+                qs = qs.filter(
+                    Q(department__sector_id=s_id) | Q(sector_id=s_id)
+                )
         elif role == 'ADVISOR':
             d_id = getattr(getattr(user, 'department', None), 'id', None) or getattr(user, 'department', None)
             if d_id:
@@ -61,7 +89,9 @@ class IndicatorGroupViewSet(viewsets.ModelViewSet):
             else:
                 s_id = getattr(getattr(user, 'sector', None), 'id', None) or getattr(user, 'sector', None)
                 if s_id:
-                    qs = qs.filter(department__sector_id=s_id)
+                    qs = qs.filter(
+                        Q(department__sector_id=s_id) | Q(sector_id=s_id)
+                    )
         return qs
 
     def destroy(self, request, *args, **kwargs):
@@ -148,9 +178,13 @@ def state_minister_dashboard(request):
     
     # Get user's sector
     sector_id = None
-    if getattr(user, 'is_superuser', False):
-        # For superuser, you might want to allow sector selection or show all
+    if getattr(user, 'is_superuser', False) or getattr(user, 'role', '').upper() == 'SUPERADMIN':
+        # For superuser or SUPERADMIN, you might want to allow sector selection or show all
         sector_id = request.query_params.get('sector_id')
+        if not sector_id:
+            # If no sector specified, get the first available sector
+            first_sector = StateMinisterSector.objects.first()
+            sector_id = first_sector.id if first_sector else None
     else:
         role = getattr(user, 'role', '').upper()
         if role == 'STATE_MINISTER':
@@ -164,16 +198,16 @@ def state_minister_dashboard(request):
     
     # Get root indicator groups for this sector (groups with no parent)
     root_groups = IndicatorGroup.objects.filter(
-        department__sector_id=sector_id,
+        Q(department__sector_id=sector_id) | Q(sector_id=sector_id),
         parent__isnull=True
-    ).select_related('department').prefetch_related(
+    ).select_related('department', 'sector').prefetch_related(
         'children__indicators',
         'indicators'
     ).distinct()
     
     # Get all ungrouped indicators for this sector
     ungrouped_indicators = Indicator.objects.filter(
-        department__sector_id=sector_id,
+        Q(department__sector_id=sector_id),
         groups__isnull=True
     ).select_related('department')
     
@@ -333,8 +367,8 @@ def state_minister_dashboard(request):
             # Generate simplified quarterly trend data for this department
             for quarter in range(1, 5):
                 # Simplified quarterly calculation
-                quarter_target = total_target / 4  # Distribute evenly across quarters
-                quarter_achieved = (total_achieved / 4)  # Distribute evenly
+                quarter_target = float(total_target / 4)  # Convert to float and distribute evenly across quarters
+                quarter_achieved = float(total_achieved / 4)  # Convert to float and distribute evenly
                 quarter_performance = (quarter_achieved / quarter_target * 100) if quarter_target > 0 else 0
                 
                 quarterly_trends.append({

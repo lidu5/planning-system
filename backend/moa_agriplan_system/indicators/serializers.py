@@ -22,7 +22,11 @@ class DepartmentSerializer(serializers.ModelSerializer):
 class IndicatorGroupSerializer(serializers.ModelSerializer):
     department = DepartmentSerializer(read_only=True)
     department_id = serializers.PrimaryKeyRelatedField(
-        queryset=Department.objects.all(), source='department', write_only=True
+        queryset=Department.objects.all(), source='department', write_only=True, required=False, allow_null=True
+    )
+    sector = StateMinisterSectorSerializer(read_only=True)
+    sector_id = serializers.PrimaryKeyRelatedField(
+        queryset=StateMinisterSector.objects.all(), source='sector', write_only=True, required=False, allow_null=True
     )
     parent = serializers.SerializerMethodField()
     parent_id = serializers.PrimaryKeyRelatedField(
@@ -40,10 +44,28 @@ class IndicatorGroupSerializer(serializers.ModelSerializer):
     class Meta:
         model = IndicatorGroup
         fields = [
-            'id', 'name', 'department', 'department_id', 'parent', 'parent_id', 
-            'unit', 'children', 'level', 'hierarchy_path', 'is_parent', 'inherited_unit',
-            'annual_target_aggregate', 'quarterly_breakdown_aggregate', 'performance_aggregate'
+            'id', 'name', 'department', 'department_id', 'sector', 'sector_id',
+            'parent', 'parent_id', 'unit', 'children', 'level', 'hierarchy_path', 
+            'is_parent', 'inherited_unit', 'annual_target_aggregate', 
+            'quarterly_breakdown_aggregate', 'performance_aggregate'
         ]
+
+    def validate(self, data):
+        """Ensure that either department or sector is provided, but not both"""
+        department = data.get('department')
+        sector = data.get('sector')
+        
+        if not department and not sector:
+            raise serializers.ValidationError(
+                "Either department or sector must be specified."
+            )
+        
+        if department and sector:
+            raise serializers.ValidationError(
+                "Cannot specify both department and sector. Choose one."
+            )
+        
+        return data
 
     def get_parent(self, obj):
         if obj.parent:
@@ -122,7 +144,7 @@ class IndicatorSerializer(serializers.ModelSerializer):
         model = Indicator
         fields = [
             'id', 'name', 'unit', 'description', 'department', 'department_id', 
-            'groups', 'group_ids', 'effective_unit', 'hierarchy_context'
+            'groups', 'group_ids', 'is_aggregatable', 'effective_unit', 'hierarchy_context'
         ]
 
     def get_hierarchy_context(self, obj):

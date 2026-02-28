@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import api from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import type { IndicatorGroup, Department, Sector } from '../types/indicator';
@@ -16,10 +16,7 @@ import {
   ChevronDown,
   Hash,
   PieChart,
-  CheckCircle,
-  AlertCircle,
-  Users,
-  BarChart3
+  AlertCircle
 } from 'lucide-react';
 
 export default function IndicatorGroups() {
@@ -27,8 +24,12 @@ export default function IndicatorGroups() {
   const isSuperuser = !!user?.is_superuser;
 
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [sectors, setSectors] = useState<Sector[]>([]);
   const [groups, setGroups] = useState<IndicatorGroup[]>([]);
   const [departmentId, setDepartmentId] = useState<number | ''>('');
+  const [sectorId, setSectorId] = useState<number | ''>('');
+  const [associationType, setAssociationType] = useState<'department' | 'sector'>('department');
+  const [formSectorId, setFormSectorId] = useState<number | ''>('');
   const [name, setName] = useState('');
   const [unit, setUnit] = useState('');
   const [parentId, setParentId] = useState<number | null>(null);
@@ -37,6 +38,69 @@ export default function IndicatorGroups() {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showForm, setShowForm] = useState(false);
+
+  // Filter parent groups based on association type and selections
+  const filteredParentGroups = useMemo(() => {
+    console.log('useMemo called with:', { 
+      associationType, 
+      formSectorId, 
+      departmentId,
+      editingId: editing?.id, 
+      groupsCount: groups.length 
+    });
+    
+    if (!formSectorId) {
+      console.log('Returning empty array - no sector selected');
+      return [];
+    }
+    
+    const filtered = groups.filter(g => {
+      // Skip the current group being edited
+      if (g.id === editing?.id) {
+        return false;
+      }
+      
+      if (associationType === 'department') {
+        // For department-level groups, show:
+        // 1. All sector-level groups from the selected sector
+        // 2. All department-level groups from the selected department
+        
+        // Check if it's a sector-level group from the same sector
+        if (g.sector?.id === formSectorId && !g.department) {
+          console.log('Including sector-level group:', g.name);
+          return true;
+        }
+        
+        // Check if it's a department-level group from the same department
+        if (departmentId && g.department?.id === departmentId) {
+          console.log('Including department-level group from same department:', g.name);
+          return true;
+        }
+        
+        console.log('Excluding group:', g.name);
+        return false;
+      } else {
+        // For sector-level groups, only show other sector-level groups from the same sector
+        if (g.sector?.id === formSectorId && !g.department) {
+          console.log('Including sector-level group:', g.name);
+          return true;
+        }
+        return false;
+      }
+    });
+    
+    console.log('Final filtered result:', filtered.map(g => g.name));
+    return filtered;
+  }, [associationType, formSectorId, departmentId, editing?.id, groups]);
+
+  // Separate filtered groups by type for better organization
+  const sectorLevelParents = useMemo(() => {
+    return filteredParentGroups.filter(g => !g.department);
+  }, [filteredParentGroups]);
+
+  const departmentLevelParents = useMemo(() => {
+    return filteredParentGroups.filter(g => g.department);
+  }, [filteredParentGroups]);
 
   const loadDepartments = async () => {
     try {
@@ -47,12 +111,30 @@ export default function IndicatorGroups() {
     }
   };
 
+  const loadSectors = async () => {
+    try {
+      const res = await api.get('/api/sectors/');
+      setSectors(res.data);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || 'Failed to load sectors');
+    }
+  };
+
   const loadGroups = async () => {
     try {
       setLoading(true);
-      const res = await api.get('/api/indicator-groups', {
-        params: departmentId ? { department: departmentId } : undefined,
-      });
+      const params: any = {};
+      // Don't filter groups when loading for parent dropdown
+      // Only use filters for the main table display
+      if (false) { // Temporarily disable filtering
+        if (departmentId) {
+          params.department = departmentId;
+        } else if (sectorId) {
+          params.sector = sectorId;
+        }
+      }
+      const res = await api.get('/api/indicator-groups', { params });
+      console.log('API response groups:', res.data.length);
       setGroups(res.data);
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Failed to load groups');
@@ -63,27 +145,43 @@ export default function IndicatorGroups() {
 
   useEffect(() => {
     loadDepartments();
+    loadSectors();
     loadGroups();
   }, []);
 
   useEffect(() => {
     loadGroups();
-  }, [departmentId]);
+  }, [departmentId, sectorId]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!departmentId) {
-      setError('Please select a department');
+    
+    if (!formSectorId) {
+      setError('Please select a sector');
       return;
     }
+
+    if (associationType === 'department' && !departmentId) {
+      setError('Please select a department for department-level groups');
+      return;
+    }
+    
     try {
-      const payload = { 
+      const payload: any = { 
         name, 
-        department_id: departmentId,
         unit: unit || undefined,
         parent_id: parentId || null
-      } as any;
+      };
+      
+      if (associationType === 'department') {
+        payload.department_id = departmentId;
+        payload.sector_id = null;
+      } else {
+        payload.department_id = null;
+        payload.sector_id = formSectorId;
+      }
+      
       if (editing) {
         await api.put(`/api/indicator-groups/${editing.id}/`, payload);
       } else {
@@ -93,6 +191,9 @@ export default function IndicatorGroups() {
       setUnit('');
       setParentId(null);
       setDepartmentId('');
+      setSectorId('');
+      setFormSectorId('');
+      setAssociationType('department');
       setEditing(null);
       setShowForm(false);
       loadGroups();
@@ -104,9 +205,25 @@ export default function IndicatorGroups() {
   const onEdit = (g: IndicatorGroup) => {
     setEditing(g);
     setName(g.name);
-    setDepartmentId(g.department.id);
     setUnit(g.unit || '');
     setParentId(g.parent_id || null);
+    if (g.department) {
+      setAssociationType('department');
+      setDepartmentId(g.department.id);
+      setFormSectorId(g.department.sector?.id || '');
+      setSectorId('');
+    } else if (g.sector) {
+      setAssociationType('sector');
+      setSectorId(g.sector.id);
+      setFormSectorId(g.sector.id);
+      setDepartmentId('');
+    } else {
+      setAssociationType('department');
+      setDepartmentId('');
+      setSectorId('');
+      setFormSectorId('');
+    }
+    
     setShowForm(true);
   };
 
@@ -126,27 +243,45 @@ export default function IndicatorGroups() {
     setUnit('');
     setParentId(null);
     setDepartmentId('');
+    setSectorId('');
+    setFormSectorId('');
+    setAssociationType('department');
     setShowForm(false);
     setError(null);
   };
 
-  // Filter groups based on search and department filter
-  const filteredGroups = groups.filter(group => {
-    const matchesSearch = searchQuery === '' || 
-      group.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      group.department?.name.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesDepartment = departmentId === '' || 
-      group.department?.id === departmentId;
-    
-    return matchesSearch && matchesDepartment;
-  });
+  // Filter groups based on search and department/sector filter
+  const filteredGroups = useMemo(() => {
+    return groups.filter(group => {
+      const matchesSearch = searchQuery === '' || 
+        group.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        group.department?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        group.sector?.name.toLowerCase().includes(searchQuery.toLowerCase());
+      
+      const matchesDepartment = departmentId === '' || 
+        group.department?.id === departmentId;
+      
+      const matchesSector = sectorId === '' || 
+        group.sector?.id === sectorId;
+      
+      return matchesSearch && (matchesDepartment || matchesSector);
+    });
+  }, [groups, searchQuery, departmentId, sectorId]);
 
-  // Get group count by department
-  const groupCountByDepartment = departments.reduce((acc, dept) => {
-    acc[dept.id] = groups.filter(g => g.department?.id === dept.id).length;
-    return acc;
-  }, {} as Record<number, number>);
+  // Get group count by department and sector
+  const groupCountByDepartment = useMemo(() => {
+    return departments.reduce((acc, dept) => {
+      acc[dept.id] = groups.filter(g => g.department?.id === dept.id).length;
+      return acc;
+    }, {} as Record<number, number>);
+  }, [departments, groups]);
+  
+  const groupCountBySector = useMemo(() => {
+    return sectors.reduce((acc, sector) => {
+      acc[sector.id] = groups.filter(g => g.sector?.id === sector.id).length;
+      return acc;
+    }, {} as Record<number, number>);
+  }, [sectors, groups]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 md:p-6">
@@ -156,7 +291,7 @@ export default function IndicatorGroups() {
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-6">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Indicator Groups</h1>
-              <p className="text-gray-600 mt-2">Organize indicators into meaningful groups by department</p>
+              <p className="text-gray-600 mt-2">Organize indicators into meaningful groups by department or sector</p>
             </div>
             
             {isSuperuser && (
@@ -171,7 +306,7 @@ export default function IndicatorGroups() {
           </div>
 
           {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
@@ -199,12 +334,24 @@ export default function IndicatorGroups() {
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
+                  <p className="text-sm font-medium text-gray-600">Sectors</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-2">{sectors.length}</p>
+                </div>
+                <div className="p-3 bg-emerald-100 rounded-xl">
+                  <PieChart className="w-6 h-6 text-emerald-600" />
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div>
                   <p className="text-sm font-medium text-gray-600">Active Filter</p>
                   <p className="text-2xl font-bold text-gray-900 mt-2">
-                    {departmentId ? 1 : 0}
+                    {(departmentId || sectorId) ? 1 : 0}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
-                    {departmentId ? 'Filter applied' : 'No filter'}
+                    {(departmentId || sectorId) ? 'Filter applied' : 'No filter'}
                   </p>
                 </div>
                 <div className="p-3 bg-amber-100 rounded-xl">
@@ -221,7 +368,7 @@ export default function IndicatorGroups() {
                 <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                 <input
                   type="text"
-                  placeholder="Search groups by name or department..."
+                  placeholder="Search groups by name, department, or sector..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-12 pr-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 shadow-sm"
@@ -233,7 +380,10 @@ export default function IndicatorGroups() {
                   <div className="relative">
                     <select
                       value={departmentId}
-                      onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : '')}
+                      onChange={(e) => {
+                        setDepartmentId(e.target.value ? Number(e.target.value) : '');
+                        setSectorId(''); // Clear sector when department is selected
+                      }}
                       className="w-full pl-12 pr-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 shadow-sm appearance-none"
                     >
                       <option value="">All Departments</option>
@@ -252,6 +402,32 @@ export default function IndicatorGroups() {
                   </div>
                 </div>
                 
+                <div className="w-64">
+                  <div className="relative">
+                    <select
+                      value={sectorId}
+                      onChange={(e) => {
+                        setSectorId(e.target.value ? Number(e.target.value) : '');
+                        setDepartmentId(''); // Clear department when sector is selected
+                      }}
+                      className="w-full pl-12 pr-4 py-3 bg-white border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 shadow-sm appearance-none"
+                    >
+                      <option value="">All Sectors</option>
+                      {sectors.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({groupCountBySector[s.id] || 0})
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute left-4 top-1/2 transform -translate-y-1/2">
+                      <PieChart className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                      <ChevronDown className="w-4 h-4 text-gray-400" />
+                    </div>
+                  </div>
+                </div>
+                
                 <button
                   onClick={loadGroups}
                   className="inline-flex items-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors duration-200 shadow-sm"
@@ -263,7 +439,7 @@ export default function IndicatorGroups() {
             </div>
 
             {/* Active Filters Display */}
-            {(searchQuery || departmentId) && (
+            {(searchQuery || departmentId || sectorId) && (
               <div className="flex flex-wrap gap-2">
                 {searchQuery && (
                   <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-purple-100 text-purple-800 text-sm rounded-full">
@@ -284,6 +460,18 @@ export default function IndicatorGroups() {
                     <button
                       onClick={() => setDepartmentId('')}
                       className="text-purple-600 hover:text-purple-800 ml-1"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                )}
+                {sectorId !== '' && (
+                  <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-100 text-emerald-800 text-sm rounded-full">
+                    <PieChart className="w-3 h-3" />
+                    Sector: {sectors.find(s => s.id === sectorId)?.name}
+                    <button
+                      onClick={() => setSectorId('')}
+                      className="text-emerald-600 hover:text-emerald-800 ml-1"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -336,27 +524,124 @@ export default function IndicatorGroups() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Building className="inline w-4 h-4 mr-1" />
-                    Department *
+                    <PieChart className="inline w-4 h-4 mr-1" />
+                    Sector *
                   </label>
                   <div className="relative">
                     <select
-                      value={departmentId}
-                      onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : '')}
+                      value={formSectorId}
+                      onChange={(e) => {
+                        const newSectorId = e.target.value ? Number(e.target.value) : '';
+                        setFormSectorId(newSectorId);
+                        // Clear department when sector changes
+                        setDepartmentId('');
+                        // Update association type based on whether we want department or sector level
+                        if (newSectorId && associationType === 'department') {
+                          // Keep as department type but wait for department selection
+                        } else if (newSectorId) {
+                          setSectorId(newSectorId);
+                        } else {
+                          setSectorId('');
+                        }
+                      }}
                       className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 appearance-none bg-white"
                       required
                     >
-                      <option value="">Select department</option>
-                      {departments.map((d) => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
+                      <option value="">Select sector</option>
+                      {sectors.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>
                     <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
                       <ChevronDown className="w-4 h-4 text-gray-400" />
                     </div>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">All groups must be associated with a department</p>
+                  <p className="text-xs text-gray-500 mt-1">Select the sector first</p>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Layers className="inline w-4 h-4 mr-1" />
+                    Association Type *
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={associationType}
+                      onChange={(e) => {
+                        const newType = e.target.value as 'department' | 'sector';
+                        setAssociationType(newType);
+                        setDepartmentId('');
+                        if (newType === 'sector' && formSectorId) {
+                          setSectorId(formSectorId);
+                        } else {
+                          setSectorId('');
+                        }
+                      }}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 appearance-none bg-white"
+                      required
+                      disabled={!formSectorId}
+                    >
+                      <option value="sector">Sector Level Only</option>
+                      <option value="department">Department Level</option>
+                    </select>
+                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                      <ChevronDown className="w-4 h-4 text-gray-400" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Choose whether this group belongs to the entire sector or a specific department within the sector
+                  </p>
+                </div>
+                {associationType === 'department' ? (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <Building className="inline w-4 h-4 mr-1" />
+                      Department *
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={departmentId}
+                        onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : '')}
+                        className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 appearance-none bg-white"
+                        required
+                      >
+                        <option value="">Select department</option>
+                        {departments
+                          .filter(d => d.sector?.id === formSectorId)
+                          .map((d) => (
+                            <option key={d.id} value={d.id}>{d.name}</option>
+                          ))}
+                      </select>
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                        <ChevronDown className="w-4 h-4 text-gray-400" />
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {formSectorId 
+                        ? `Select department from ${sectors.find(s => s.id === formSectorId)?.name}`
+                        : 'Select a sector first'
+                      }
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      <PieChart className="inline w-4 h-4 mr-1" />
+                      Sector Level Group
+                    </label>
+                    <div className="px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-lg">
+                      <p className="text-sm text-gray-700">
+                        {formSectorId 
+                          ? `This group will be associated with: ${sectors.find(s => s.id === formSectorId)?.name}`
+                          : 'Select a sector first'
+                        }
+                      </p>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">This group will be associated with the entire sector</p>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -383,26 +668,67 @@ export default function IndicatorGroups() {
                       value={parentId || ''}
                       onChange={(e) => setParentId(e.target.value ? Number(e.target.value) : null)}
                       className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all duration-200 appearance-none bg-white"
+                      disabled={!formSectorId || (associationType === 'department' && !departmentId)}
                     >
                       <option value="">No Parent (Root Level)</option>
-                      {groups
-                        .filter(g => (!departmentId || g.department?.id === departmentId) && g.id !== editing?.id)
-                        .map((g) => (
-                          <option key={g.id} value={g.id}>
-                            {g.hierarchy_path}
-                          </option>
-                        ))}
+                      
+                      {sectorLevelParents.length > 0 && (
+                        <optgroup label="Sector Level Groups">
+                          {sectorLevelParents.map((g) => (
+                            <option key={g.id} value={g.id}>
+                              {g.hierarchy_path}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      
+                      {departmentLevelParents.length > 0 && associationType === 'department' && (
+                        <optgroup label="Department Level Groups">
+                          {departmentLevelParents.map((g) => (
+                            <option key={g.id} value={g.id}>
+                              {g.hierarchy_path} (Dept: {g.department?.name})
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                     <div className="absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none">
                       <ChevronDown className="w-4 h-4 text-gray-400" />
                     </div>
                   </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {departmentId 
-                      ? 'Select a parent group to create hierarchy (optional)' 
-                      : 'Select a department first to see available parent groups'
-                    }
-                  </p>
+                  
+                  {/* Helper text showing what groups are available */}
+                  <div className="mt-2 space-y-1">
+                    {formSectorId && associationType === 'department' && departmentId && (
+                      <p className="text-xs text-purple-600">
+                        <span className="font-medium">Available parents:</span>
+                        <br />
+                        • All sector-level groups from {sectors.find(s => s.id === formSectorId)?.name}
+                        <br />
+                        • All department-level groups from {departments.find(d => d.id === departmentId)?.name}
+                      </p>
+                    )}
+                    
+                    {formSectorId && associationType === 'sector' && (
+                      <p className="text-xs text-purple-600">
+                        <span className="font-medium">Available parents:</span>
+                        <br />
+                        • All sector-level groups from {sectors.find(s => s.id === formSectorId)?.name}
+                      </p>
+                    )}
+                    
+                    {!formSectorId && (
+                      <p className="text-xs text-amber-600">
+                        Select a sector first to see available parent groups
+                      </p>
+                    )}
+                    
+                    {associationType === 'department' && !departmentId && formSectorId && (
+                      <p className="text-xs text-amber-600">
+                        Select a department to see department-level parent groups
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -446,11 +772,11 @@ export default function IndicatorGroups() {
               </h3>
               <p className="text-sm text-gray-600">
                 Showing {filteredGroups.length} of {groups.length} groups
-                {(searchQuery || departmentId) && ' (filtered)'}
+                {(searchQuery || departmentId || sectorId) && ' (filtered)'}
               </p>
             </div>
             <div className="text-sm text-gray-600">
-              Sorted by department • {departments.length} departments
+              Sorted by department/sector • {departments.length} departments, {sectors.length} sectors
             </div>
           </div>
         </div>
@@ -525,7 +851,7 @@ export default function IndicatorGroups() {
                           <div className="p-1.5 bg-blue-100 rounded-md">
                             <Building className="w-4 h-4 text-blue-600" />
                           </div>
-                          <span className="text-gray-700">{g.department?.name}</span>
+                          <span className="text-gray-700">{g.department?.name || 'No department'}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -533,7 +859,9 @@ export default function IndicatorGroups() {
                           <div className="p-1.5 bg-emerald-100 rounded-md">
                             <PieChart className="w-4 h-4 text-emerald-600" />
                           </div>
-                          <span className="text-gray-700">{g.department?.sector?.name || 'No sector'}</span>
+                          <span className="text-gray-700">
+                            {g.sector?.name || g.department?.sector?.name || 'No sector'}
+                          </span>
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -625,12 +953,14 @@ export default function IndicatorGroups() {
                     <div className="space-y-2 text-sm">
                       <div className="flex items-center gap-2">
                         <Building className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                        <span className="text-gray-700">{g.department?.name}</span>
+                        <span className="text-gray-700">{g.department?.name || 'No department'}</span>
                       </div>
-                      {g.department?.sector?.name && (
+                      {(g.sector?.name || g.department?.sector?.name) && (
                         <div className="flex items-center gap-2">
                           <PieChart className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                          <span className="text-gray-700">Sector: {g.department.sector.name}</span>
+                          <span className="text-gray-700">
+                            Sector: {g.sector?.name || g.department?.sector?.name}
+                          </span>
                         </div>
                       )}
                       {g.unit && (

@@ -23,7 +23,7 @@ import {
 
 type Department = { id: number; name: string; sector?: { id: number; name: string } };
 type IndicatorGroup = { id: number; name: string; department: Department };
-type Indicator = { id: number; name: string; unit?: string; description?: string; department: Department; groups?: IndicatorGroup[] };
+type Indicator = { id: number; name: string; unit?: string; description?: string; department: Department; groups?: IndicatorGroup[]; is_aggregatable?: boolean };
 type Sector = { id: number; name: string };
 
 export default function Indicators() {
@@ -40,6 +40,7 @@ export default function Indicators() {
   const [departmentId, setDepartmentId] = useState<number | ''>('');
   const [groups, setGroups] = useState<IndicatorGroup[]>([]);
   const [groupIds, setGroupIds] = useState<number[]>([]);
+  const [isAggregatable, setIsAggregatable] = useState(true);
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -151,6 +152,7 @@ export default function Indicators() {
     setSectorId('');
     setDepartmentId('');
     setGroupIds([]);
+    setIsAggregatable(true);
     setFormError(null);
     setIsFormVisible(true);
   };
@@ -188,7 +190,8 @@ export default function Indicators() {
         unit: unit.trim() || undefined, 
         description: description.trim() || undefined, 
         department_id: departmentId, 
-        group_ids: groupIds 
+        group_ids: groupIds,
+        ...(groupIds.length > 0 && { is_aggregatable: isAggregatable })
       };
       
       if (editing) {
@@ -224,6 +227,7 @@ export default function Indicators() {
     setSectorId(sec as any);
     setDepartmentId(i.department.id);
     setGroupIds((i.groups || []).map((g) => g.id));
+    setIsAggregatable(i.is_aggregatable ?? true);
     setIsFormVisible(true);
     
     // Scroll to form
@@ -528,6 +532,31 @@ export default function Indicators() {
                 )}
               </div>
 
+              {groupIds.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <CheckCircle className="inline w-4 h-4 mr-1" />
+                    Aggregatable
+                  </label>
+                  <div className="flex items-center h-10">
+                    <input
+                      type="checkbox"
+                      id="is-aggregatable"
+                      checked={isAggregatable}
+                      onChange={(e) => setIsAggregatable(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                      disabled={isSubmitting}
+                    />
+                    <label htmlFor="is-aggregatable" className="ml-2 text-sm text-gray-700">
+                      Include in parent group calculations
+                    </label>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    When enabled, this indicator's value will be summed and contribute to the parent group's total
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
                 <textarea
@@ -661,13 +690,14 @@ export default function Indicators() {
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Department</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Sector</th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Groups</th>
+                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Aggregatable</th>
                   {isSuperuser && <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {loading ? (
                   <tr>
-                    <td colSpan={isSuperuser ? 7 : 6} className="px-6 py-12 text-center">
+                    <td colSpan={isSuperuser ? 8 : 7} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center gap-3">
                         <div className="w-8 h-8 border-3 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
                         <p className="text-gray-600">Loading indicators...</p>
@@ -676,7 +706,7 @@ export default function Indicators() {
                   </tr>
                 ) : paged.length === 0 ? (
                   <tr>
-                    <td colSpan={isSuperuser ? 7 : 6} className="px-6 py-12 text-center">
+                    <td colSpan={isSuperuser ? 8 : 7} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center gap-3">
                         <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
                           <Search className="w-6 h-6 text-gray-400" />
@@ -754,6 +784,21 @@ export default function Indicators() {
                               </span>
                             )}
                           </div>
+                        ) : (
+                          <span className="text-gray-400">—</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        {(i.groups && i.groups.length > 0) ? (
+                          i.is_aggregatable === false ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                              No
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              Yes
+                            </span>
+                          )
                         ) : (
                           <span className="text-gray-400">—</span>
                         )}
@@ -853,6 +898,18 @@ export default function Indicators() {
                                 {g.name}
                               </span>
                             ))}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-600">Aggregatable:</span>
+                            {i.is_aggregatable === false ? (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-red-100 text-red-800">
+                                No
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-green-100 text-green-800">
+                                Yes
+                              </span>
+                            )}
                           </div>
                         </div>
                       )}
