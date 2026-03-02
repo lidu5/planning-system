@@ -730,14 +730,32 @@ class IndicatorPerformanceView(APIView):
             else:
                 filtered_perfs = indicator_perfs
             
-            total_achieved = sum(float(p.value) for p in filtered_perfs if p.value is not None)
+            # Check if target is N/A (None, empty, or 'N/A')
+            is_na_target = (plan.target is None or plan.target == '' or plan.target == 'N/A')
             
-            # Calculate proportional target based on quarter_months
-            target = float(plan.target)
-            if quarter_months:
-                target = (target * quarter_months) / 12
+            # Calculate proportional target based on quarter_months (only if not N/A)
+            if not is_na_target:
+                try:
+                    target = float(plan.target)
+                    if quarter_months:
+                        target = (target * quarter_months) / 12
+                except (ValueError, TypeError):
+                    is_na_target = True
+                    target = 0
+            else:
+                target = 0
             
-            if target > 0:
+            # Check if all performances are N/A
+            all_performances_na = all(p.value is None or p.value == '' or p.value == 'N/A' for p in filtered_perfs)
+            
+            # Calculate total achieved (exclude N/A values)
+            total_achieved = sum(float(p.value) for p in filtered_perfs if p.value is not None and p.value != '' and p.value != 'N/A')
+            
+            # Calculate performance percentage
+            if is_na_target or all_performances_na:
+                # If target is N/A or all performances are N/A, set performance to None
+                performance_pct = None
+            elif target > 0:
                 performance_pct = (total_achieved / target) * 100
             else:
                 performance_pct = None
@@ -755,8 +773,8 @@ class IndicatorPerformanceView(APIView):
                 'unit': indicator.unit or '',
                 'description': indicator.description or '',
                 'department_name': plan.indicator.department.name,
-                'target': target,
-                'achieved': total_achieved,
+                'target': 0 if is_na_target else target,
+                'achieved': 0 if all_performances_na else total_achieved,
                 'performance_percentage': performance_pct,
                 'group_id': group_id,
                 'group_name': group_name,
