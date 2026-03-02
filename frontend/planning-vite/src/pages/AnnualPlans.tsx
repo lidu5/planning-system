@@ -183,6 +183,19 @@ export default function AnnualPlans() {
     })();
   }, [departmentId]);
 
+  // When sector filter changes, reset department filter and load departments for that sector
+  useEffect(() => {
+    (async () => {
+      if (sectorFilter) {
+        setDepartmentFilter('');
+        await loadDepartments(Number(sectorFilter));
+      } else {
+        const res = await api.get('/api/departments/');
+        setDepartments(res.data);
+      }
+    })();
+  }, [sectorFilter]);
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -996,9 +1009,9 @@ export default function AnnualPlans() {
 
                         {/* Indicators - Nested Animated Collapse */}
                         <div className={`overflow-hidden transition-all duration-300 ${
-                          expandedGroups.has(`${sKey}-${dKey}`) ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'
+                          expandedGroups.has(`${sKey}-${dKey}`) ? 'opacity-100' : 'max-h-0 opacity-0'
                         }`}>
-                          <div className="px-6 py-4 bg-gray-50/50">
+                          <div className="px-6 py-4 bg-gray-50/50 max-h-[5000px] overflow-y-auto">
                             {/* Grouped Indicators */}
                             {(() => {
                               const groupsMap = new Map<string, AnnualPlan[]>();
