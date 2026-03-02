@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, ComposedChart } from 'recharts';
 import api from '../lib/api';
 import YearFilter from '../components/YearFilter';
+import QuarterFilter from '../components/QuarterFilter';
 import { getCurrentEthiopianDate, toGregorianYearFromEthiopian, toEthiopianYearFromGregorian } from '../lib/ethiopian';
 
 type AnnualPlan = {
@@ -184,6 +185,7 @@ export default function MinisterView() {
   const ethDate = getCurrentEthiopianDate();
   const currentYear = Array.isArray(ethDate) && typeof ethDate[0] === 'number' ? ethDate[0] : new Date().getFullYear() - 7;
   const [year, setYear] = useState<number>(currentYear);
+  const [quarterMonths, setQuarterMonths] = useState<number | null>(null);
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -233,7 +235,7 @@ export default function MinisterView() {
       const gregorianYear = toGregorianYearFromEthiopian(year);
       const [dashRes, plansRes, bRes, pRes] = await Promise.all([
         api.get('/api/minister-dashboard/', {
-          params: { year: gregorianYear },
+          params: { year: gregorianYear, quarter_months: quarterMonths },
         }),
         api.get('/api/annual-plans/', { params: { year: gregorianYear } }),
         api.get('/api/breakdowns/'),
@@ -252,7 +254,7 @@ export default function MinisterView() {
 
   useEffect(() => {
     loadDashboard();
-  }, [year]);
+  }, [year, quarterMonths]);
 
   // Load indicator performance data
   const loadIndicatorPerformance = async () => {
@@ -261,7 +263,7 @@ export default function MinisterView() {
     try {
       const gregorianYear = toGregorianYearFromEthiopian(year);
       const res = await api.get('/api/indicator-performance/', {
-        params: { year: gregorianYear },
+        params: { year: gregorianYear, quarter_months: quarterMonths },
       });
       setIndicatorData(res.data);
     } catch (e: any) {
@@ -277,7 +279,7 @@ export default function MinisterView() {
     try {
       const gregorianYear = toGregorianYearFromEthiopian(year);
       const res = await api.get('/api/indicator-detail/', {
-        params: { indicator_id: indicatorId, year: gregorianYear },
+        params: { indicator_id: indicatorId, year: gregorianYear, quarter_months: quarterMonths },
       });
       setIndicatorDetail(res.data);
     } catch (e: any) {
@@ -291,13 +293,13 @@ export default function MinisterView() {
     if (activeTab === 'indicators') {
       loadIndicatorPerformance();
     }
-  }, [year, activeTab]);
+  }, [year, quarterMonths, activeTab]);
 
   useEffect(() => {
     if (selectedIndicatorId) {
       loadIndicatorDetail(selectedIndicatorId);
     }
-  }, [selectedIndicatorId, year]);
+  }, [selectedIndicatorId, year, quarterMonths]);
 
   // Prepare pie chart data
   const approvalPieData = useMemo(() => {
@@ -314,27 +316,54 @@ export default function MinisterView() {
 
     for (const p of plans) {
       if (!p.sector_id || !p.sector_name) continue;
-      const totalActual = perfs
-        .filter((pr) => pr.plan === p.id)
-        .reduce((sum, pr) => sum + toNumber(pr.value), 0);
-      const target = toNumber(p.target);
+      
+      // Filter performances based on quarter selection
+      const filteredPerfs = perfs.filter((pr) => {
+        if (pr.plan !== p.id) return false;
+        if (!quarterMonths) return true; // Full year - include all quarters
+        
+        // For quarter filtering, only include quarters up to the selected month
+        const quarterEndMonth = quarterMonths;
+        const quarterMonthsMap: Record<number, number> = { 1: 3, 2: 6, 3: 9, 4: 12 };
+        return quarterMonthsMap[pr.quarter] <= quarterEndMonth;
+      });
+      
+      const totalActual = filteredPerfs.reduce((sum, pr) => sum + toNumber(pr.value), 0);
+      
+      // For target, we need to calculate the proportional target based on quarter selection
+      let target = toNumber(p.target);
+      if (quarterMonths) {
+        // Calculate proportional target (e.g., 3 months = 25% of annual target, 6 months = 50%, etc.)
+        target = (target * quarterMonths) / 12;
+      }
+      
+      // Only calculate percentage if we have valid data (target > 0 and actual >= 0)
       if (target <= 0) continue;
       const pct = (totalActual / target) * 100;
-      if (!sectorMap[p.sector_id]) {
-        sectorMap[p.sector_id] = { name: p.sector_name, percentages: [] };
+      
+      // Exclude N/A values (0% with no actual data) from averages
+      // Only include if there's actual performance data or meaningful achievement
+      if (totalActual > 0 || pct > 0) {
+        if (!sectorMap[p.sector_id]) {
+          sectorMap[p.sector_id] = { name: p.sector_name, percentages: [] };
+        }
+        sectorMap[p.sector_id].percentages.push(pct);
       }
-      sectorMap[p.sector_id].percentages.push(pct);
     }
 
     return Object.values(sectorMap)
-      .map((s) => ({
-        sector: s.name,
-        performance: s.percentages.length
-          ? s.percentages.reduce((a, b) => a + b, 0) / s.percentages.length
-          : 0,
-      }))
+      .map((s) => {
+        // Calculate average excluding any remaining invalid values
+        const validPercentages = s.percentages.filter(p => !isNaN(p) && p >= 0);
+        return {
+          sector: s.name,
+          performance: validPercentages.length
+            ? validPercentages.reduce((a, b) => a + b, 0) / validPercentages.length
+            : 0,
+        };
+      })
       .sort((a, b) => b.performance - a.performance);
-  }, [plans, perfs]);
+  }, [plans, perfs, quarterMonths]);
 
   const { sectorQuarterTrend, sectorList, generalQuarterTrend } = useMemo(() => {
     const sectorMap: Record<
@@ -354,13 +383,25 @@ export default function MinisterView() {
       const breakdown = breakdowns.find((b) => b.plan === p.id);
 
       for (let q = 1; q <= 4; q++) {
+        // Skip quarters beyond the selected quarter period
+        if (quarterMonths) {
+          const quarterMonthsMap: Record<number, number> = { 1: 3, 2: 6, 3: 9, 4: 12 };
+          if (quarterMonthsMap[q] > quarterMonths) continue;
+        }
+        
         const target = toNumber(breakdown?.[`q${q}` as keyof Breakdown]);
         if (target <= 0) continue;
         const actual = perfs
           .filter((pr) => pr.plan === p.id && pr.quarter === q)
           .reduce((sum, pr) => sum + toNumber(pr.value), 0);
+        
+        // Only calculate percentage if we have valid data
         const pct = (actual / target) * 100;
-        sectorMap[p.sector_id].quarters[q - 1].push(pct);
+        
+        // Exclude N/A values (0% with no actual data) from averages
+        if (actual > 0 || pct > 0) {
+          sectorMap[p.sector_id].quarters[q - 1].push(pct);
+        }
       }
     }
 
@@ -373,15 +414,20 @@ export default function MinisterView() {
       };
     }
 
-    const trendData = Array.from({ length: 4 }, (_, idx) => {
+    // Determine how many quarters to show based on selection
+    const numQuarters = quarterMonths ? Math.floor(quarterMonths / 3) : 4;
+    
+    const trendData = Array.from({ length: numQuarters }, (_, idx) => {
       const entry: Record<string, string | number> = { quarter: `Q${idx + 1}` };
       const sectorQuarterValues: number[] = [];
 
       for (const sector of Object.values(sectorMap)) {
         const vals = sector.quarters[idx];
-        const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+        // Calculate average excluding N/A values (0% with no actual data)
+        const validVals = vals.filter(v => !isNaN(v) && v >= 0);
+        const avg = validVals.length ? validVals.reduce((a, b) => a + b, 0) / validVals.length : 0;
         entry[sector.name] = avg;
-        if (vals.length) sectorQuarterValues.push(avg);
+        if (validVals.length) sectorQuarterValues.push(avg);
       }
 
       const generalAvg =
@@ -403,7 +449,7 @@ export default function MinisterView() {
       sectorList: sectorNames,
       generalQuarterTrend: generalTrend,
     };
-  }, [plans, breakdowns, perfs]);
+  }, [plans, breakdowns, perfs, quarterMonths]);
 
   if (loading && !data) {
     return (
@@ -590,13 +636,23 @@ export default function MinisterView() {
           <div className="mb-8">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
               <h1 className="text-3xl font-bold text-gray-900">Indicator Performance Dashboard</h1>
-              <div className="w-64">
-                <YearFilter
-                  value={year}
-                  onChange={setYear}
-                  variant="dropdown"
-                  showLabel={false}
-                />
+              <div className="flex flex-col md:flex-row gap-4">
+                <div className="w-48">
+                  <YearFilter
+                    value={year}
+                    onChange={setYear}
+                    variant="dropdown"
+                    showLabel={false}
+                  />
+                </div>
+                <div className="w-48">
+                  <QuarterFilter
+                    value={quarterMonths}
+                    onChange={setQuarterMonths}
+                    variant="dropdown"
+                    showLabel={false}
+                  />
+                </div>
               </div>
             </div>
             <p className="text-gray-600">
@@ -1068,7 +1124,16 @@ export default function MinisterView() {
                               />
                               <YAxis yAxisId="left" />
                               <Tooltip 
-                                formatter={(value: any, name: string) => [value, name]}
+                                formatter={(value: any, name: string) => {
+                                  // Handle N/A values in yearly combo chart
+                                  if (name === 'Achieved' && (value === 0 || value === null)) {
+                                    return ['No Data', name];
+                                  }
+                                  if (name === 'Target' && (value === 0 || value === null)) {
+                                    return ['No Target', name];
+                                  }
+                                  return [value, name];
+                                }}
                                 labelFormatter={(label) => `Year: ${label} ዓ.ም`}
                               />
                               <Legend />
@@ -1080,12 +1145,24 @@ export default function MinisterView() {
                                 stroke="#10b981"
                                 strokeWidth={2}
                                 name="Achieved"
+                                connectNulls={false} // Don't connect lines through missing data
                               />
                             </ComposedChart>
                           </ResponsiveContainer>
                         ) : (
                           <ResponsiveContainer width="100%" height={300}>
-                            <ComposedChart data={indicatorDetail.quarterly_data}>
+                            <ComposedChart 
+                              data={
+                                // Filter quarterly data based on quarter selection
+                                quarterMonths 
+                                  ? indicatorDetail.quarterly_data.filter((_, index) => {
+                                      const quarterNum = index + 1;
+                                      const quarterMonthsMap: Record<number, number> = { 1: 3, 2: 6, 3: 9, 4: 12 };
+                                      return quarterMonthsMap[quarterNum] <= quarterMonths;
+                                    })
+                                  : indicatorDetail.quarterly_data
+                              }
+                            >
                               <CartesianGrid strokeDasharray="3 3" />
                               <XAxis 
                                 dataKey="quarter"
@@ -1093,7 +1170,16 @@ export default function MinisterView() {
                               />
                               <YAxis yAxisId="left" />
                               <Tooltip 
-                                formatter={(value: any, name: string) => [value, name]}
+                                formatter={(value: any, name: string) => {
+                                  // Handle N/A values in quarterly combo chart
+                                  if (name === 'Achieved' && (value === 0 || value === null)) {
+                                    return ['No Data', name];
+                                  }
+                                  if (name === 'Target' && (value === 0 || value === null)) {
+                                    return ['No Target', name];
+                                  }
+                                  return [value, name];
+                                }}
                                 labelFormatter={(label) => `${label} - ${year} ዓ.ም`}
                               />
                               <Legend />
@@ -1105,6 +1191,7 @@ export default function MinisterView() {
                                 stroke="#10b981"
                                 strokeWidth={2}
                                 name="Achieved"
+                                connectNulls={false} // Don't connect lines through missing data
                               />
                             </ComposedChart>
                           </ResponsiveContainer>
@@ -1136,13 +1223,23 @@ export default function MinisterView() {
         <div className="mb-8">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
             <h1 className="text-3xl font-bold text-gray-900">Minister's Dashboard</h1>
-            <div className="w-64">
-              <YearFilter
-                value={year}
-                onChange={setYear}
-                variant="dropdown"
-                showLabel={false}
-              />
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="w-48">
+                <YearFilter
+                  value={year}
+                  onChange={setYear}
+                  variant="dropdown"
+                  showLabel={false}
+                />
+              </div>
+              <div className="w-48">
+                <QuarterFilter
+                  value={quarterMonths}
+                  onChange={setQuarterMonths}
+                  variant="dropdown"
+                  showLabel={false}
+                />
+              </div>
             </div>
           </div>
           <p className="text-gray-600">
@@ -1187,74 +1284,6 @@ export default function MinisterView() {
           </div>
         )}
 
-        {/* Four KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-blue-500">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Total Annual Target</h3>
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-              </div>
-            </div>
-            <div className="text-3xl font-bold text-gray-900">{data.kpis.total_annual_target.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-green-500">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Total Achieved Performance</h3>
-              <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-                </svg>
-              </div>
-            </div>
-            <div className="text-3xl font-bold text-gray-900">{data.kpis.total_achieved_performance.toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-purple-500">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Overall Achievement %</h3>
-              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-              </div>
-            </div>
-            <div className="text-3xl font-bold text-gray-900">{data.kpis.achievement_percentage.toFixed(1)}%</div>
-            <div className="mt-2">
-              <div className="w-full bg-gray-200 rounded-full h-2">
-                <div
-                  className="bg-purple-500 h-2 rounded-full transition-all"
-                  style={{ width: `${Math.min(data.kpis.achievement_percentage, 100)}%` }}
-                ></div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-lg p-6 border-l-4 border-orange-500">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Indicators Status</h3>
-              <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">On Track</span>
-                <span className="text-xl font-bold text-green-600">{data.kpis.indicators_on_track}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Lagging</span>
-                <span className="text-xl font-bold text-red-600">{data.kpis.indicators_lagging}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* Sector-wise Performance Comparison Chart (normalized) */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
           <div className="flex items-center justify-between mb-2">
@@ -1275,12 +1304,48 @@ export default function MinisterView() {
                   interval={0}
                 />
                 <YAxis />
-                <Tooltip formatter={(value: number) => `${value.toFixed(1)}%`} />
+                <Tooltip 
+                  formatter={(value: number, name: string) => {
+                    if (value === 0) {
+                      // Check if this is truly N/A (no valid indicators) vs actual 0% performance
+                      const sectorData = sectorPerformanceData.find(s => s.performance === 0);
+                      const hasValidIndicators = sectorData && sectorData.performance > 0;
+                      return hasValidIndicators ? [`${value.toFixed(1)}%`, name] : ['No Data', name];
+                    }
+                    return [`${value.toFixed(1)}%`, name];
+                  }}
+                />
                 <Legend />
-                <Bar dataKey="performance" fill={COLORS.primary} name="Average Performance (%)" />
+                <Bar 
+                  dataKey="performance" 
+                  fill={COLORS.primary} 
+                  name="Average Performance (%)"
+                  shape={(props: any) => {
+                    const { performance } = props;
+                    // Use different color for N/A data (0% with no valid indicators)
+                    if (performance === 0) {
+                      const sectorData = sectorPerformanceData.find(s => s.performance === 0);
+                      const hasValidIndicators = sectorData && sectorData.performance > 0;
+                      if (!hasValidIndicators) {
+                        return <rect {...props} fill="#9ca3af" opacity={0.5} />;
+                      }
+                    }
+                    return <rect {...props} fill={COLORS.primary} />;
+                  }}
+                />
               </BarChart>
             )}
           </ResponsiveContainer>
+          <div className="flex items-center gap-4 mt-4 text-xs text-gray-500">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-emerald-600 rounded"></div>
+              <span>Valid Performance Data</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-gray-400 rounded opacity-50"></div>
+              <span>No Data Available</span>
+            </div>
+          </div>
         </div>
 
         {/* Quarterly Performance Trend by Sector (normalized) */}
@@ -1297,7 +1362,15 @@ export default function MinisterView() {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="quarter" />
                 <YAxis />
-                <Tooltip formatter={(value: number) => `${(value as number).toFixed(1)}%`} />
+                <Tooltip 
+                  formatter={(value: number, name: string) => {
+                    if (value === 0) {
+                      // Check if this is N/A vs actual 0% performance
+                      return ['No Data', name];
+                    }
+                    return [`${(value as number).toFixed(1)}%`, name];
+                  }}
+                />
                 <Legend />
                 {sectorList.map((sectorName, idx) => {
                   const colors = ['#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#22c55e', '#2563eb', '#14b8a6'];
@@ -1309,6 +1382,7 @@ export default function MinisterView() {
                       stroke={colors[idx % colors.length]}
                       strokeWidth={2}
                       dot={{ r: 3 }}
+                      connectNulls={false} // Don't connect lines through null/missing data
                       name={sectorName}
                     />
                   );
@@ -1316,6 +1390,16 @@ export default function MinisterView() {
               </LineChart>
             )}
           </ResponsiveContainer>
+          <div className="flex items-center gap-4 mt-4 text-xs text-gray-500">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-0 border-t-2 border-emerald-600"></div>
+              <span>Valid Performance Data</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-0 border-t-2 border-gray-400 border-dashed"></div>
+              <span>No Data Available (gaps in lines)</span>
+            </div>
+          </div>
         </div>
 
         {/* General Quarterly Performance Trend (normalized) */}
@@ -1414,42 +1498,6 @@ export default function MinisterView() {
                 </tbody>
               </table>
             </div>
-          </div>
-        </div>
-
-        {/* Sector Summary Cards */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Sector Summary</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {data.sector_summaries.map((sector) => (
-              <div key={sector.sector_id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                <h3 className="font-semibold text-gray-900 mb-3">{sector.sector_name}</h3>
-                <div className="space-y-2 mb-3">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Annual Target:</span>
-                    <span className="font-medium">{sector.annual_target.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Achieved:</span>
-                    <span className="font-medium">{sector.performance_achieved.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Progress:</span>
-                    <span className={`font-semibold ${sector.progress_rate >= 75 ? 'text-green-600' : sector.progress_rate >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
-                      {sector.progress_rate.toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className={`h-2 rounded-full transition-all ${
-                      sector.progress_rate >= 75 ? 'bg-green-500' : sector.progress_rate >= 50 ? 'bg-yellow-500' : 'bg-red-500'
-                    }`}
-                    style={{ width: `${Math.min(sector.progress_rate, 100)}%` }}
-                  ></div>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
 

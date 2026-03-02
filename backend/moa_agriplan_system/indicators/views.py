@@ -220,9 +220,11 @@ def state_minister_dashboard(request):
         # Calculate total performance across all quarters
         total_performance = 0
         for quarter in range(1, 5):
-            total_performance += group.get_performance_aggregate(year, quarter)
+            quarter_performance = group.get_performance_aggregate(year, quarter)
+            if quarter_performance is not None:
+                total_performance += quarter_performance
         
-        performance_percentage = (total_performance / annual_target * 100) if annual_target > 0 else None
+        performance_percentage = (total_performance / annual_target * 100) if annual_target and annual_target > 0 else None
         
         return {
             'annual_target_aggregate': annual_target,

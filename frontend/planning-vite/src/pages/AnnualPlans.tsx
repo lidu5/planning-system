@@ -15,7 +15,6 @@ import {
   Trash2, 
   ChevronRight, 
   ChevronDown,
-  BarChart3,
   Download,
   Search,
   CheckCircle,
@@ -51,6 +50,7 @@ type AnnualPlan = {
   indicator_unit?: string;
   indicator_group_id?: number | null;
   indicator_group_name?: string | null;
+  indicator_is_aggregatable?: boolean;
   department_id?: number;
   department_name?: string;
   sector_id?: number;
@@ -115,7 +115,7 @@ export default function AnnualPlans() {
 
   const isAdvisorOrMinister = useMemo(() => {
     const r = (user?.role || '').toUpperCase();
-    return r === 'ADVISOR' || r === 'STATE_MINISTER';
+    return r === 'ADVISOR' || r === 'STATE_MINISTER' || r === 'REGIONAL_STATE_MINISTER' || r === 'MINISTER' || r === 'REGIONAL_STATE_MINISTER';
   }, [user?.role]);
 
   const loadPlans = async () => {
@@ -316,14 +316,6 @@ export default function AnnualPlans() {
     toggleGroup(groupId);
   };
 
-  const totalTarget = useMemo(() => {
-    return filteredPlans.reduce((sum, plan) => sum + (parseFloat(plan.target) || 0), 0);
-  }, [filteredPlans]);
-
-  const averageTarget = useMemo(() => {
-    return filteredPlans.length > 0 ? totalTarget / filteredPlans.length : 0;
-  }, [filteredPlans, totalTarget]);
-
   const resetForm = () => {
     setShowForm(false);
     setSectorId('');
@@ -388,7 +380,7 @@ export default function AnnualPlans() {
           </div>
 
           {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
               <div className="flex items-center justify-between">
                 <div>
@@ -400,34 +392,6 @@ export default function AnnualPlans() {
                 </div>
                 <div className="p-3 bg-blue-100 rounded-xl">
                   <Calendar className="w-6 h-6 text-blue-600" />
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Total Target</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-2">
-                    {totalTarget.toLocaleString()}
-                  </p>
-                </div>
-                <div className="p-3 bg-emerald-100 rounded-xl">
-                  <Target className="w-6 h-6 text-emerald-600" />
-                </div>
-              </div>
-            </div>
-            
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Average Target</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-2">
-                    {averageTarget.toFixed(2)}
-                  </p>
-                </div>
-                <div className="p-3 bg-purple-100 rounded-xl">
-                  <BarChart3 className="w-6 h-6 text-purple-600" />
                 </div>
               </div>
             </div>
@@ -1056,9 +1020,12 @@ export default function AnnualPlans() {
                                   {Array.from(groupsMap.entries()).map(([gname, items]) => {
                                     const yearTotals = new Map<number, number>();
                                     for (const p of items) {
-                                      const y = toEthiopianYearFromGregorian(p.year);
-                                      const val = parseFloat(String(p.target || '0')) || 0;
-                                      yearTotals.set(y, (yearTotals.get(y) || 0) + val);
+                                      // Only include aggregatable indicators in group totals
+                                      if (p.indicator_is_aggregatable !== false) {
+                                        const y = toEthiopianYearFromGregorian(p.year);
+                                        const val = parseFloat(String(p.target || '0')) || 0;
+                                        yearTotals.set(y, (yearTotals.get(y) || 0) + val);
+                                      }
                                     }
 
                                     return (

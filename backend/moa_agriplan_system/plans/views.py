@@ -447,7 +447,13 @@ class QuarterlyBreakdownViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Only draft or rejected breakdowns can be submitted.'}, status=status.HTTP_400_BAD_REQUEST)
             
         # Enforce quarterly totals equal annual target upon submission (2 decimal places)
-        total = (obj.q1 or Decimal('0')) + (obj.q2 or Decimal('0')) + (obj.q3 or Decimal('0')) + (obj.q4 or Decimal('0'))
+        # Only sum applicable quarters for this indicator
+        applicable_values = []
+        for quarter, value in [(1, obj.q1), (2, obj.q2), (3, obj.q3), (4, obj.q4)]:
+            if obj.plan.indicator.is_quarter_applicable(quarter):
+                applicable_values.append(value or Decimal('0'))
+        
+        total = sum(applicable_values)
         total = total.quantize(Decimal('0.01'))
         target = (obj.plan.target or Decimal('0')).quantize(Decimal('0.01'))
         if total != target:
@@ -612,13 +618,15 @@ class QuarterlyPerformanceViewSet(viewsets.ModelViewSet):
         # has reached at least State Minister approval (APPROVED or beyond).
         return bd.status in [PlanStatus.APPROVED, PlanStatus.VALIDATED, PlanStatus.FINAL_APPROVED]
 
-    def _allow_perf_edit(self, request, plan):
+    def _allow_perf_edit(self, request, plan, is_na_performance=False):
         # Nobody can edit quarterly performance until the related quarterly breakdown
         # has reached at least State Minister approval, and only Lead Executive Body
         # and State Minister can encode (create/update) the performance values.
-        bd = QuarterlyBreakdown.objects.filter(plan=plan).first()
-        if not bd or bd.status not in [PlanStatus.APPROVED, PlanStatus.VALIDATED, PlanStatus.FINAL_APPROVED]:
-            return False
+        # Exception: N/A performances can be created without approved breakdown since there's nothing to track
+        if not is_na_performance:
+            bd = QuarterlyBreakdown.objects.filter(plan=plan).first()
+            if not bd or bd.status not in [PlanStatus.APPROVED, PlanStatus.VALIDATED, PlanStatus.FINAL_APPROVED]:
+                return False
 
         role = getattr(request.user, 'role', '')
         if role not in ['LEAD_EXECUTIVE_BODY', 'STATE_MINISTER']:
@@ -635,17 +643,39 @@ class QuarterlyPerformanceViewSet(viewsets.ModelViewSet):
             plan = AnnualPlan.objects.get(id=plan_id)
         except AnnualPlan.DoesNotExist:
             return Response({'detail': 'Invalid plan.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not self._allow_perf_edit(request, plan):
+        
+        # Check if this is an N/A performance
+        value = request.data.get('value')
+        status = request.data.get('status', 'DRAFT')
+        is_na_performance = value is None or value == '' or value == 'N/A'
+        
+        if not self._allow_perf_edit(request, plan, is_na_performance):
             return Response({'detail': 'Only Lead Executive Body can create performance for an approved quarterly plan.'}, status=status.HTTP_403_FORBIDDEN)
-        # Enforce quarter submission window on create
+        
+        # Enforce quarter submission window on create (except for N/A performances)
         try:
             quarter = int(request.data.get('quarter'))
         except (TypeError, ValueError):
             quarter = None
-        if quarter is not None:
+        if quarter is not None and not is_na_performance:
             now = timezone.now()
             if not within_quarter_submission_window(now, quarter):
                 return Response({'detail': 'Entry window closed for this quarter performance.'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # For N/A performances, allow setting status to SUBMITTED directly
+        if is_na_performance and status == 'SUBMITTED':
+            # Create the performance first
+            response = super().create(request, *args, **kwargs)
+            # Then update it to SUBMITTED status
+            perf = QuarterlyPerformance.objects.get(id=response.data['id'])
+            perf.status = PerformanceStatus.SUBMITTED
+            perf.submitted_by = request.user
+            perf.submitted_at = timezone.now()
+            perf.save()
+            # Return the updated performance
+            serializer = self.get_serializer(perf)
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
         return super().create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
@@ -658,12 +688,17 @@ class QuarterlyPerformanceViewSet(viewsets.ModelViewSet):
         if obj.status == PerformanceStatus.SUBMITTED and getattr(request.user, 'role', '') != 'STATE_MINISTER':
             return Response({'detail': 'Only State Minister can edit submitted performance.'}, status=status.HTTP_403_FORBIDDEN)
 
-        if not self._allow_perf_edit(request, obj.plan):
+        # Check if this is an N/A performance
+        value = request.data.get('value', obj.value)
+        is_na_performance = value is None or value == '' or value == 'N/A'
+        
+        if not self._allow_perf_edit(request, obj.plan, is_na_performance):
             return Response({'detail': 'Only Lead Executive Body can update performance for an approved quarterly plan.'}, status=status.HTTP_403_FORBIDDEN)
-        # Enforce quarter submission window on update
-        now = timezone.now()
-        if not within_quarter_submission_window(now, obj.quarter):
-            return Response({'detail': 'Entry window closed for this quarter performance.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Enforce quarter submission window on update (except for N/A performances)
+        if not is_na_performance:
+            now = timezone.now()
+            if not within_quarter_submission_window(now, obj.quarter):
+                return Response({'detail': 'Entry window closed for this quarter performance.'}, status=status.HTTP_400_BAD_REQUEST)
         return super().update(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'])

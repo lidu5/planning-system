@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { getCurrentEthiopianDate } from '../lib/ethiopian';
 import YearFilter from '../components/YearFilter';
 import { getErrorMessage } from '../lib/error';
+import { formatQuarterValue, formatQuarterValueForInput, convertInputToAPIValue } from '../lib/quarterlyUtils';
 
 // Reuse AnnualPlan shape enriched by backend
 type AnnualPlan = {
@@ -60,8 +61,6 @@ export default function QuarterlyBreakdowns() {
   const [planWindowOpen, setPlanWindowOpen] = useState<boolean>(true);
 
   const [planModal, setPlanModal] = useState<{ open: boolean; planId: number | null; quarter: 1|2|3|4 | null; value: string; indicatorName: string }>(() => ({ open: false, planId: null, quarter: null, value: '', indicatorName: '' }));
-  const [perfModal, setPerfModal] = useState<{ open: boolean; planId: number | null; quarter: 1|2|3|4 | null; value: string; indicatorName: string }>(() => ({ open: false, planId: null, quarter: null, value: '', indicatorName: '' }));
-  const showPerformance = false;
   const [rejectionModal, setRejectionModal] = useState<{ open: boolean; title: string; note: string; by?: string; at?: string; byId?: number }>(() => ({ open: false, title: '', note: '' }));
 
   const loadData = async () => {
@@ -69,11 +68,9 @@ export default function QuarterlyBreakdowns() {
     setError(null);
     try {
       const gregYear = toGregorianYearFromEthiopian(year);
-      const [plansRes, bRes, pRes, winRes] = await Promise.all([
-        // Fetch annual plans for the selected year via GET with query params
+      const [plansRes, bRes, winRes] = await Promise.all([
         api.get('/api/annual-plans/', { params: { year: gregYear } }),
         api.get('/api/breakdowns/'),
-        showPerformance ? api.get('/api/performances/') : Promise.resolve({ data: [] }),
         api.get('/api/submission-windows/status/', { params: { year: gregYear } }),
       ]);
       const all: AnnualPlan[] = plansRes.data || [];
@@ -84,14 +81,6 @@ export default function QuarterlyBreakdowns() {
       const map: Record<number, Breakdown> = {};
       for (const b of (bRes.data || []) as Breakdown[]) map[b.plan] = b;
       setBreakdowns(map);
-      
-      const pmap: Record<string, Performance> = {};
-      if (showPerformance) {
-        for (const pr of (pRes.data || []) as Performance[]) {
-          pmap[`${pr.plan}-${pr.quarter}`] = pr;
-        }
-      }
-      setPerfs(pmap);
 
       // Update breakdown window state based on backend configuration
       const win = (winRes as any)?.data;
@@ -117,6 +106,54 @@ export default function QuarterlyBreakdowns() {
   useEffect(() => {
     loadData();
   }, [year]);
+
+  const canEditPlan = (planId?: number): boolean => {
+    const role = (user?.role || '').toUpperCase();
+    if (!planWindowOpen) return false;
+    if (role !== 'LEAD_EXECUTIVE_BODY') return false;
+    if (!planId) return true;
+    const st = (breakdowns[planId]?.status || 'DRAFT').toUpperCase();
+    return st === 'DRAFT' || st === 'REJECTED';
+  };
+
+  const canSubmitPlan = (planId?: number): boolean => {
+    const role = (user?.role || '').toUpperCase();
+    if (!planWindowOpen) return false;
+    if (role !== 'LEAD_EXECUTIVE_BODY') return false;
+    if (!planId) return true;
+    const st = (breakdowns[planId]?.status || 'DRAFT').toUpperCase();
+    return st === 'DRAFT' || st === 'REJECTED';
+  };
+
+  const statusBadge = (status?: string) => {
+    const s = (status || 'DRAFT').toUpperCase();
+    const styles: Record<string, { bg: string; text: string; icon: string }> = {
+      DRAFT: { bg: 'bg-gray-100', text: 'text-gray-700', icon: '✏️' },
+      SUBMITTED: { bg: 'bg-blue-100', text: 'text-blue-700', icon: '📤' },
+      APPROVED: { bg: 'bg-emerald-100', text: 'text-emerald-700', icon: '✅' },
+      VALIDATED: { bg: 'bg-purple-100', text: 'text-purple-700', icon: '🔒' },
+      FINAL_APPROVED: { bg: 'bg-green-200', text: 'text-green-800', icon: '🏆' },
+      REJECTED: { bg: 'bg-red-100', text: 'text-red-700', icon: '❌' },
+    };
+    const style = styles[s] || styles.DRAFT;
+    return (
+      <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full ${style.bg} ${style.text} text-xs font-medium`}>
+        <span className="text-xs">{style.icon}</span>
+        <span>{s.replace('_', ' ')}</span>
+      </div>
+    );
+  };
+
+  const getQuarterLabel = (quarter: 1|2|3|4) => {
+    const labels = ['Q1', 'Q2', 'Q3', 'Q4'];
+    const periods = ['Jan-Mar', 'Apr-Jun', 'Jul-Sep', 'Oct-Dec'];
+    return (
+      <div className="flex flex-col items-center">
+        <span className="font-semibold">{labels[quarter-1]}</span>
+        <span className="text-xs text-gray-500">{periods[quarter-1]}</span>
+      </div>
+    );
+  };
 
   const grouped = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -184,8 +221,8 @@ export default function QuarterlyBreakdowns() {
         p.indicator_unit || '',
         String(toEthiopianYearFromGregorian(p.year) || ''),
         String(p.target || ''),
-        annualPerformance(p.id).toFixed(2),
-        String(bd?.q1 || ''), String(bd?.q2 || ''), String(bd?.q3 || ''), String(bd?.q4 || ''),
+        '0.00', // annualPerformance(p.id).toFixed(2),
+        formatQuarterValue(bd?.q1), formatQuarterValue(bd?.q2), formatQuarterValue(bd?.q3), formatQuarterValue(bd?.q4),
         (bd?.status || ''),
       ]);
     }
@@ -225,7 +262,8 @@ export default function QuarterlyBreakdowns() {
 
   const ensureCreate = async (planId: number) => {
     if (breakdowns[planId]?.id) return breakdowns[planId];
-    const res = await api.post('/api/breakdowns/', { plan: planId, q1: '0', q2: '0', q3: '0', q4: '0' });
+    // Use empty strings instead of '0' to preserve N/A values
+    const res = await api.post('/api/breakdowns/', { plan: planId, q1: '', q2: '', q3: '', q4: '' });
     const created: Breakdown = res.data;
     setBreakdowns((prev) => ({ ...prev, [planId]: created }));
     return created;
@@ -235,12 +273,19 @@ export default function QuarterlyBreakdowns() {
     try {
       const bd = await ensureCreate(planId);
       const current = breakdowns[planId] || bd;
+      
+      // Convert values to API format, properly handling N/A vs 0
+      const q1Value = overrides && overrides.q1 !== undefined ? convertInputToAPIValue(overrides.q1) : convertInputToAPIValue(current?.q1?.toString() ?? '');
+      const q2Value = overrides && overrides.q2 !== undefined ? convertInputToAPIValue(overrides.q2) : convertInputToAPIValue(current?.q2?.toString() ?? '');
+      const q3Value = overrides && overrides.q3 !== undefined ? convertInputToAPIValue(overrides.q3) : convertInputToAPIValue(current?.q3?.toString() ?? '');
+      const q4Value = overrides && overrides.q4 !== undefined ? convertInputToAPIValue(overrides.q4) : convertInputToAPIValue(current?.q4?.toString() ?? '');
+      
       await api.put(`/api/breakdowns/${bd.id}/`, {
         plan: planId,
-        q1: (overrides && overrides.q1 !== undefined ? overrides.q1 : (current?.q1 ?? '0')),
-        q2: (overrides && overrides.q2 !== undefined ? overrides.q2 : (current?.q2 ?? '0')),
-        q3: (overrides && overrides.q3 !== undefined ? overrides.q3 : (current?.q3 ?? '0')),
-        q4: (overrides && overrides.q4 !== undefined ? overrides.q4 : (current?.q4 ?? '0')),
+        q1: q1Value,
+        q2: q2Value,
+        q3: q3Value,
+        q4: q4Value,
         status: current.status || bd.status,
       });
       await loadData();
@@ -279,108 +324,6 @@ export default function QuarterlyBreakdowns() {
     }
   };
 
-  const ensurePerf = async (planId: number, quarter: 1|2|3|4) => {
-    const key = `${planId}-${quarter}`;
-    if (perfs[key]?.id) return perfs[key];
-    const res = await api.post('/api/performances/', { plan: planId, quarter, value: '0' });
-    const created: Performance = res.data;
-    setPerfs((prev) => ({ ...prev, [key]: created }));
-    return created;
-  };
-
-  const savePerformance = async (planId: number, quarter: 1|2|3|4, value: string) => {
-    try {
-      const perf = await ensurePerf(planId, quarter);
-      await api.put(`/api/performances/${perf.id}/`, { plan: planId, quarter, value, status: perf.status });
-      await loadData();
-      setSuccess('Performance saved successfully');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (e: any) {
-      const msg = e?.userMessage || getErrorMessage(e, 'Save performance failed');
-      setError(msg);
-    }
-  };
-
-  const submitPerformance = async (planId: number, quarter: 1|2|3|4) => {
-    try {
-      const perf = await ensurePerf(planId, quarter);
-      await api.post(`/api/performances/${perf.id}/submit/`);
-      await loadData();
-      setSuccess('Performance submitted for review');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (e: any) {
-      const msg = e?.userMessage || getErrorMessage(e, 'Submit performance failed');
-      setError(msg);
-    }
-  };
-
-  const statusBadge = (status?: string) => {
-    const s = (status || 'DRAFT').toUpperCase();
-    const styles: Record<string, { bg: string; text: string; icon: string }> = {
-      DRAFT: { bg: 'bg-gray-100', text: 'text-gray-700', icon: '✏️' },
-      SUBMITTED: { bg: 'bg-blue-100', text: 'text-blue-700', icon: '📤' },
-      APPROVED: { bg: 'bg-emerald-100', text: 'text-emerald-700', icon: '✅' },
-      VALIDATED: { bg: 'bg-purple-100', text: 'text-purple-700', icon: '🔒' },
-      FINAL_APPROVED: { bg: 'bg-green-200', text: 'text-green-800', icon: '🏆' },
-      REJECTED: { bg: 'bg-red-100', text: 'text-red-700', icon: '❌' },
-    };
-    const style = styles[s] || styles.DRAFT;
-    return (
-      <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full ${style.bg} ${style.text} text-xs font-medium`}>
-        <span className="text-xs">{style.icon}</span>
-        <span>{s.replace('_', ' ')}</span>
-      </div>
-    );
-  };
-
-  const canEditPlan = (planId?: number): boolean => {
-    const role = (user?.role || '').toUpperCase();
-    if (!planWindowOpen) return false;
-    if (role !== 'LEAD_EXECUTIVE_BODY') return false;
-    if (!planId) return true;
-    const st = (breakdowns[planId]?.status || 'DRAFT').toUpperCase();
-    return st === 'DRAFT' || st === 'REJECTED';
-  };
-
-  const canSubmitPlan = (planId?: number): boolean => {
-    const role = (user?.role || '').toUpperCase();
-    if (!planWindowOpen) return false;
-    if (role !== 'LEAD_EXECUTIVE_BODY') return false;
-    if (!planId) return true;
-    const st = (breakdowns[planId]?.status || 'DRAFT').toUpperCase();
-    return st === 'DRAFT' || st === 'REJECTED';
-  };
-
-  const canEditPerformance = (planId: number, quarter?: 1|2|3|4): boolean => {
-    const role = (user?.role || '').toUpperCase();
-    if (role !== 'LEAD_EXECUTIVE_BODY') return false;
-    const st = (breakdowns[planId]?.status || 'DRAFT').toUpperCase();
-    if (!(st === 'APPROVED' || st === 'VALIDATED' || st === 'FINAL_APPROVED')) return false;
-
-    if (quarter) {
-      const key = `${planId}-${quarter}`;
-      const perfStatus = (perfs[key]?.status || 'DRAFT').toUpperCase();
-      return perfStatus === 'DRAFT' || perfStatus === 'REJECTED';
-    }
-    return true;
-  };
-
-  const canSubmitPerformance = (): boolean => {
-    const role = (user?.role || '').toUpperCase();
-    if (role !== 'LEAD_EXECUTIVE_BODY') return false;
-    return true;
-  };
-
-  const annualPerformance = (planId: number): number => {
-    let sum = 0;
-    for (let q: 1|2|3|4 = 1; q <= 4; q = (q + 1) as 1|2|3|4) {
-      const key = `${planId}-${q}`;
-      const v = parseFloat(perfs[key]?.value || '0');
-      if (!isNaN(v)) sum += v;
-    }
-    return sum;
-  };
-
   const planTotal = (bd?: Breakdown): number => {
     if (!bd) return 0;
     const v = ['q1','q2','q3','q4'].map((k) => parseFloat((bd as any)[k] || '0'));
@@ -394,22 +337,140 @@ export default function QuarterlyBreakdowns() {
     return Math.abs(total - (isNaN(target) ? 0 : target)) > 0.0001;
   };
 
-  const isAdvisor = (user?.role || '').toUpperCase() === 'ADVISOR';
+  const renderIndicatorRow = (p: AnnualPlan) => {
+    const bd = breakdowns[p.id];
+    const planQ = (q: 1|2|3|4) => formatQuarterValue(bd ? (bd[`q${q}` as const] as string | null) : null);
+    const prev = prevPlanByIndicator[p.indicator];
+    const prevAnnualStr = prev ? String(prev.target || '') : '-';
 
-  const getQuarterColor = (value: string, isPlan: boolean = true) => {
-    const num = parseFloat(value);
-    if (isNaN(num) || num === 0) return 'bg-gray-50 text-gray-500';
-    if (isPlan) return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
-    return 'bg-blue-50 text-blue-700 border border-blue-200';
-  };
-
-  const getQuarterLabel = (quarter: 1|2|3|4) => {
-    const labels = ['Q1', 'Q2', 'Q3', 'Q4'];
-    const periods = ['Jan-Mar', 'Apr-Jun', 'Jul-Sep', 'Oct-Dec'];
     return (
-      <div className="flex flex-col items-center">
-        <span className="font-semibold">{labels[quarter-1]}</span>
-        <span className="text-xs text-gray-500">{periods[quarter-1]}</span>
+      <div key={p.id} className="px-6 py-4 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0">
+        <div className="grid grid-cols-12 gap-4 items-center">
+          {/* Indicator Details */}
+          <div className="col-span-12 lg:col-span-3">
+            <div className="font-medium text-gray-900">{p.indicator_name}</div>
+            <div className="text-sm text-gray-500 mt-1 flex items-center gap-2">
+              <span className="inline-flex items-center gap-1">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {p.indicator_unit || 'No unit'}
+              </span>
+              {p.indicator_group_name && (
+                <span className="inline-flex items-center gap-1 bg-gray-100 px-2 py-0.5 rounded text-xs">
+                  {p.indicator_group_name}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Data Cells */}
+          <div className="col-span-12 lg:col-span-7">
+            <div className="grid grid-cols-8 gap-2">
+              {/* Baseline */}
+              <div className="col-span-2">
+                <div className="bg-gray-100 text-gray-700 px-3 py-2.5 rounded-lg text-center font-medium">
+                  {prevAnnualStr}
+                </div>
+                <div className="text-xs text-gray-500 text-center mt-1">Baseline</div>
+              </div>
+
+              {/* Annual Target */}
+              <div className="col-span-2">
+                <div className={`px-3 py-2.5 rounded-lg text-center font-medium ${
+                  planMismatch(p) 
+                    ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                    : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                }`}>
+                  {p.target || '0'}
+                  {planMismatch(p) && (
+                    <div className="text-xs mt-1 text-amber-600">
+                      ✗ Mismatch: {planTotal(bd).toFixed(2)}
+                    </div>
+                  )}
+                </div>
+                <div className="text-xs text-gray-500 text-center mt-1">Annual</div>
+              </div>
+
+              {/* Quarters */}
+              {[1, 2, 3, 4].map((q) => (
+                <div key={q} className="col-span-1">
+                  <button
+                  disabled={!canEditPlan(p.id)}
+                    title={`${p.indicator_name} • Q${q}: ${String(planQ(q as 1|2|3|4) || '0')}`}
+                  onClick={() => canEditPlan(p.id) && setPlanModal({ 
+                      open: true, 
+                      planId: p.id, 
+                      quarter: q as 1|2|3|4, 
+                      value: formatQuarterValueForInput(String(planQ(q as 1|2|3|4) || '')), 
+                      indicatorName: p.indicator_name 
+                    })}
+                    className={`w-full px-2 py-2.5 rounded-lg text-center font-medium transition-all ${
+                      canEditPlan(p.id)
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:shadow-sm'
+                        : 'bg-gray-50 text-gray-500 border border-gray-200 cursor-not-allowed'
+                    }`}
+                  >
+                    {planQ(q as 1|2|3|4) || '0'}
+                  </button>
+                  <div className="text-xs text-gray-500 text-center mt-1">Q{q}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Status & Actions */}
+          <div className="col-span-12 lg:col-span-2">
+            <div className="flex flex-col gap-3">
+              {/* Status */}
+              <div className="flex justify-center">
+                {statusBadge(bd?.status)}
+              </div>
+
+              {/* Actions */}
+              <div className="flex flex-col gap-2">
+                <button
+                  disabled={!canEditPlan(p.id)}
+                  onClick={() => canEditPlan(p.id) && savePlan(p.id)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    canEditPlan(p.id)
+                      ? 'bg-blue-600 text-white hover:bg-blue-700'
+                      : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                  }`}
+                >
+                  Save Plan
+                </button>
+                <button
+                  disabled={!canSubmitPlan(p.id)}
+                  onClick={() => canSubmitPlan(p.id) && submitPlan(p.id)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                    canSubmitPlan(p.id)
+                      ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                      : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                  }`}
+                >
+                  {(bd?.status || '').toUpperCase() === 'REJECTED' ? 'Resubmit' : 'Submit'}
+                </button>
+              </div>
+
+              {/* Rejection Note */}
+              {bd?.status?.toUpperCase() === 'REJECTED' && bd?.review_comment && (
+                <button
+                  onClick={() => setRejectionModal({
+                    open: true,
+                    title: 'Plan Rejection Details',
+                    note: bd.review_comment || '',
+                    by: (bd as any)?.reviewed_by_name || (bd as any)?.rejected_by_name || '',
+                    at: (bd as any)?.reviewed_at || (bd as any)?.rejected_at || ''
+                  })}
+                  className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-2 py-1 hover:bg-red-100 transition-colors"
+                >
+                  View Rejection Note
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
@@ -713,13 +774,13 @@ export default function QuarterlyBreakdowns() {
                     value={planModal.value}
                     onChange={(e) => setPlanModal((m) => ({ ...m, value: e.target.value }))}
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-lg"
-                    placeholder="Enter target value"
+                    placeholder="N/A (leave empty for not applicable)"
                     autoFocus
                   />
                 </div>
                 <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
                   <div className="font-medium mb-1">Note:</div>
-                  <div>Quarterly plans must sum to the annual target. The system will validate this before submission.</div>
+                  <div>Quarterly plans must sum to the annual target. Empty fields will be saved as N/A (not applicable).</div>
                 </div>
               </div>
               <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
@@ -733,7 +794,6 @@ export default function QuarterlyBreakdowns() {
                   onClick={() => {
                     if (planModal.planId && planModal.quarter) {
                       const key = `q${planModal.quarter}` as 'q1' | 'q2' | 'q3' | 'q4';
-                      updateCell(planModal.planId, key, planModal.value);
                       savePlan(planModal.planId, { [key]: planModal.value } as any);
                     }
                     setPlanModal({ open: false, planId: null, quarter: null, value: '', indicatorName: '' });
@@ -810,143 +870,4 @@ export default function QuarterlyBreakdowns() {
       </div>
     </div>
   );
-
-  // Helper function to render indicator row
-  function renderIndicatorRow(p: AnnualPlan) {
-    const bd = breakdowns[p.id];
-    const planQ = (q: 1|2|3|4) => (bd ? (bd[`q${q}` as const] as string | null) : null) ?? '';
-    const prev = prevPlanByIndicator[p.indicator];
-    const prevAnnualStr = prev ? String(prev.target || '') : '-';
-
-    return (
-      <div key={p.id} className="px-6 py-4 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0">
-        <div className="grid grid-cols-12 gap-4 items-center">
-          {/* Indicator Details */}
-          <div className="col-span-12 lg:col-span-3">
-            <div className="font-medium text-gray-900">{p.indicator_name}</div>
-            <div className="text-sm text-gray-500 mt-1 flex items-center gap-2">
-              <span className="inline-flex items-center gap-1">
-                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                {p.indicator_unit || 'No unit'}
-              </span>
-              {p.indicator_group_name && (
-                <span className="inline-flex items-center gap-1 bg-gray-100 px-2 py-0.5 rounded text-xs">
-                  {p.indicator_group_name}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Data Cells */}
-          <div className="col-span-12 lg:col-span-7">
-            <div className="grid grid-cols-8 gap-2">
-              {/* Baseline */}
-              <div className="col-span-2">
-                <div className="bg-gray-100 text-gray-700 px-3 py-2.5 rounded-lg text-center font-medium">
-                  {prevAnnualStr}
-                </div>
-                <div className="text-xs text-gray-500 text-center mt-1">Baseline</div>
-              </div>
-
-              {/* Annual Target */}
-              <div className="col-span-2">
-                <div className={`px-3 py-2.5 rounded-lg text-center font-medium ${
-                  planMismatch(p) 
-                    ? 'bg-amber-100 text-amber-800 border border-amber-200' 
-                    : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                }`}>
-                  {p.target || '0'}
-                  {planMismatch(p) && (
-                    <div className="text-xs mt-1 text-amber-600">
-                      ✗ Mismatch: {planTotal(bd).toFixed(2)}
-                    </div>
-                  )}
-                </div>
-                <div className="text-xs text-gray-500 text-center mt-1">Annual</div>
-              </div>
-
-              {/* Quarters */}
-              {[1, 2, 3, 4].map((q) => (
-                <div key={q} className="col-span-1">
-                  <button
-                  disabled={!canEditPlan(p.id)}
-                    title={`${p.indicator_name} • Q${q}: ${String(planQ(q as 1|2|3|4) || '0')}`}
-                  onClick={() => canEditPlan(p.id) && setPlanModal({ 
-                      open: true, 
-                      planId: p.id, 
-                      quarter: q as 1|2|3|4, 
-                      value: String(planQ(q as 1|2|3|4) || ''), 
-                      indicatorName: p.indicator_name 
-                    })}
-                    className={`w-full px-2 py-2.5 rounded-lg text-center font-medium transition-all ${
-                      canEditPlan(p.id)
-                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:shadow-sm'
-                        : 'bg-gray-50 text-gray-500 border border-gray-200 cursor-not-allowed'
-                    }`}
-                  >
-                    {planQ(q as 1|2|3|4) || '0'}
-                  </button>
-                  <div className="text-xs text-gray-500 text-center mt-1">Q{q}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Status & Actions */}
-          <div className="col-span-12 lg:col-span-2">
-            <div className="flex flex-col gap-3">
-              {/* Status */}
-              <div className="flex justify-center">
-                {statusBadge(bd?.status)}
-              </div>
-
-              {/* Actions */}
-              <div className="flex flex-col gap-2">
-                <button
-                  disabled={!canEditPlan(p.id)}
-                  onClick={() => canEditPlan(p.id) && savePlan(p.id)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    canEditPlan(p.id)
-                      ? 'bg-blue-600 text-white hover:bg-blue-700'
-                      : 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                  }`}
-                >
-                  Save Plan
-                </button>
-                <button
-                  disabled={!canSubmitPlan(p.id)}
-                  onClick={() => canSubmitPlan(p.id) && submitPlan(p.id)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                    canSubmitPlan(p.id)
-                      ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                      : 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                  }`}
-                >
-                  {(bd?.status || '').toUpperCase() === 'REJECTED' ? 'Resubmit' : 'Submit'}
-                </button>
-              </div>
-
-              {/* Rejection Note */}
-              {bd?.status?.toUpperCase() === 'REJECTED' && bd?.review_comment && (
-                <button
-                  onClick={() => setRejectionModal({
-                    open: true,
-                    title: 'Plan Rejection Details',
-                    note: bd.review_comment || '',
-                    by: (bd as any)?.reviewed_by_name || (bd as any)?.rejected_by_name || '',
-                    at: (bd as any)?.reviewed_at || (bd as any)?.rejected_at || ''
-                  })}
-                  className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-2 py-1 hover:bg-red-100 transition-colors"
-                >
-                  View Rejection Note
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 }

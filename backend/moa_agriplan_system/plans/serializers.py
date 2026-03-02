@@ -2,6 +2,18 @@ from rest_framework import serializers
 from .models import AnnualPlan, QuarterlyBreakdown, QuarterlyPerformance, FileAttachment, SubmissionWindow, AdvisorComment
 
 
+class NullableDecimalField(serializers.DecimalField):
+    """Custom DecimalField that converts empty strings and 'N/A' to None, but preserves 0"""
+    
+    def to_internal_value(self, data):
+        if data == '' or data is None or data == 'N/A':
+            return None
+        # Explicitly handle 0 to ensure it's preserved as 0, not converted to None
+        if data == 0 or data == '0' or data == '0.00':
+            return 0
+        return super().to_internal_value(data)
+
+
 class AnnualPlanSerializer(serializers.ModelSerializer):
     indicator_name = serializers.CharField(source='indicator.name', read_only=True)
     department_id = serializers.IntegerField(source='indicator.department.id', read_only=True)
@@ -11,12 +23,13 @@ class AnnualPlanSerializer(serializers.ModelSerializer):
     indicator_unit = serializers.CharField(source='indicator.unit', read_only=True)
     indicator_group_id = serializers.SerializerMethodField()
     indicator_group_name = serializers.SerializerMethodField()
+    indicator_is_aggregatable = serializers.BooleanField(source='indicator.is_aggregatable', read_only=True)
 
     class Meta:
         model = AnnualPlan
         fields = [
             'id', 'year', 'indicator', 'indicator_name', 'indicator_unit',
-            'indicator_group_id', 'indicator_group_name',
+            'indicator_group_id', 'indicator_group_name', 'indicator_is_aggregatable',
             'department_id', 'department_name', 'sector_id', 'sector_name',
             'target', 'created_by', 'created_at'
         ]
@@ -33,30 +46,112 @@ class AnnualPlanSerializer(serializers.ModelSerializer):
 
 class QuarterlyBreakdownSerializer(serializers.ModelSerializer):
     total = serializers.DecimalField(max_digits=20, decimal_places=2, read_only=True)
+    quarter_applicability = serializers.SerializerMethodField()
+    quarter_values = serializers.SerializerMethodField()
+    quarter_values_display = serializers.SerializerMethodField()
+    
+    # Use custom nullable decimal fields
+    q1 = NullableDecimalField(max_digits=20, decimal_places=2, required=False, allow_null=True)
+    q2 = NullableDecimalField(max_digits=20, decimal_places=2, required=False, allow_null=True)
+    q3 = NullableDecimalField(max_digits=20, decimal_places=2, required=False, allow_null=True)
+    q4 = NullableDecimalField(max_digits=20, decimal_places=2, required=False, allow_null=True)
 
     class Meta:
         model = QuarterlyBreakdown
         fields = [
             'id', 'plan', 'q1', 'q2', 'q3', 'q4', 'total', 'status',
             'submitted_by', 'submitted_at', 'reviewed_by', 'review_comment', 'reviewed_at',
-            'validated_by', 'validated_at', 'final_approved_by', 'final_approved_at'
+            'validated_by', 'validated_at', 'final_approved_by', 'final_approved_at',
+            'quarter_applicability', 'quarter_values', 'quarter_values_display'
         ]
         read_only_fields = [
             'submitted_by', 'submitted_at', 'reviewed_by', 'reviewed_at',
-            'validated_by', 'validated_at', 'final_approved_by', 'final_approved_at', 'total'
+            'validated_by', 'validated_at', 'final_approved_by', 'final_approved_at', 
+            'total', 'quarter_applicability', 'quarter_values', 'quarter_values_display'
         ]
+
+    def get_quarter_applicability(self, obj):
+        """Return which quarters are applicable for this indicator"""
+        indicator = obj.plan.indicator
+        return {
+            'q1': indicator.is_quarter_applicable(1),
+            'q2': indicator.is_quarter_applicable(2),
+            'q3': indicator.is_quarter_applicable(3),
+            'q4': indicator.is_quarter_applicable(4),
+        }
+
+    def get_quarter_values_display(self, obj):
+        """Return quarter values formatted for display with N/A vs 0 distinction"""
+        indicator = obj.plan.indicator
+        result = {}
+        for quarter, value in [(1, obj.q1), (2, obj.q2), (3, obj.q3), (4, obj.q4)]:
+            if not indicator.is_quarter_applicable(quarter):
+                result[f'q{quarter}'] = 'N/A'
+            elif value is None:
+                result[f'q{quarter}'] = 'N/A'
+            elif value == 0:
+                result[f'q{quarter}'] = '0.00'
+            else:
+                result[f'q{quarter}'] = f"{value:.2f}"
+        return result
+
+    def get_quarter_values(self, obj):
+        """Return quarter values with NULL for non-applicable quarters"""
+        indicator = obj.plan.indicator
+        return {
+            'q1': obj.get_quarter_value(1) if indicator.is_quarter_applicable(1) else None,
+            'q2': obj.get_quarter_value(2) if indicator.is_quarter_applicable(2) else None,
+            'q3': obj.get_quarter_value(3) if indicator.is_quarter_applicable(3) else None,
+            'q4': obj.get_quarter_value(4) if indicator.is_quarter_applicable(4) else None,
+        }
 
     # Do not enforce sum==target here; this will be checked during submit action
     # to allow drafting partial quarterly values.
     def validate(self, attrs):
+        # Convert empty strings to None for quarterly fields
+        for quarter_field in ['q1', 'q2', 'q3', 'q4']:
+            if quarter_field in attrs:
+                value = attrs[quarter_field]
+                if value == '' or value is None:
+                    attrs[quarter_field] = None
+                elif value == 0:
+                    # Keep 0 as 0 (explicit zero value)
+                    attrs[quarter_field] = 0
         return attrs
+
+    def validate_q1(self, value):
+        """Validate Q1 field - convert empty to None"""
+        if value == '' or value is None:
+            return None
+        return value
+
+    def validate_q2(self, value):
+        """Validate Q2 field - convert empty to None"""
+        if value == '' or value is None:
+            return None
+        return value
+
+    def validate_q3(self, value):
+        """Validate Q3 field - convert empty to None"""
+        if value == '' or value is None:
+            return None
+        return value
+
+    def validate_q4(self, value):
+        """Validate Q4 field - convert empty to None"""
+        if value == '' or value is None:
+            return None
+        return value
 
 
 class QuarterlyPerformanceSerializer(serializers.ModelSerializer):
+    value = NullableDecimalField(max_digits=20, decimal_places=2, required=False, allow_null=True)
+    value_display = serializers.SerializerMethodField()
+    
     class Meta:
         model = QuarterlyPerformance
         fields = [
-            'id', 'plan', 'quarter', 'value', 'status', 'variance_description',
+            'id', 'plan', 'quarter', 'value', 'value_display', 'status', 'variance_description',
             'submitted_by', 'submitted_at', 'reviewed_by', 'review_comment', 'reviewed_at',
             'validated_by', 'validated_at', 'final_approved_by', 'final_approved_at'
         ]
@@ -64,6 +159,14 @@ class QuarterlyPerformanceSerializer(serializers.ModelSerializer):
             'submitted_by', 'submitted_at', 'reviewed_by', 'reviewed_at',
             'validated_by', 'validated_at', 'final_approved_by', 'final_approved_at'
         ]
+    
+    def get_value_display(self, obj):
+        if obj.value is None:
+            return 'N/A'
+        # Format 0 as '0.00' for consistency
+        if obj.value == 0:
+            return '0.00'
+        return f"{obj.value:.2f}"
 
 
 class FileAttachmentSerializer(serializers.ModelSerializer):

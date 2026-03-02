@@ -34,10 +34,10 @@ class PlanStatus(models.TextChoices):
 
 class QuarterlyBreakdown(models.Model):
     plan = models.OneToOneField(AnnualPlan, on_delete=models.CASCADE, related_name='quarterly_breakdown')
-    q1 = models.DecimalField(max_digits=20, decimal_places=2, default=0)
-    q2 = models.DecimalField(max_digits=20, decimal_places=2, default=0)
-    q3 = models.DecimalField(max_digits=20, decimal_places=2, default=0)
-    q4 = models.DecimalField(max_digits=20, decimal_places=2, default=0)
+    q1 = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True)
+    q2 = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True)
+    q3 = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True)
+    q4 = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True)
     status = models.CharField(max_length=20, choices=PlanStatus.choices, default=PlanStatus.DRAFT)
     submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='submitted_breakdowns')
     submitted_at = models.DateTimeField(null=True, blank=True)
@@ -51,13 +51,32 @@ class QuarterlyBreakdown(models.Model):
     sent_to_strategic = models.BooleanField(default=False)
 
     def clean(self):
-        total = (self.q1 or 0) + (self.q2 or 0) + (self.q3 or 0) + (self.q4 or 0)
+        # Only sum applicable quarters for validation
+        applicable_values = []
+        for quarter, value in [(1, self.q1), (2, self.q2), (3, self.q3), (4, self.q4)]:
+            if self.plan.indicator.is_quarter_applicable(quarter):
+                applicable_values.append(value or 0)
+        
+        total = sum(applicable_values)
         if total != self.plan.target:
-            raise ValidationError("Quarterly totals must equal the annual target")
+            raise ValidationError(f"Sum of applicable quarters ({total}) must equal the annual target ({self.plan.target})")
 
     @property
     def total(self):
-        return (self.q1 or 0) + (self.q2 or 0) + (self.q3 or 0) + (self.q4 or 0)
+        # Only sum applicable quarters
+        applicable_values = []
+        for quarter, value in [(1, self.q1), (2, self.q2), (3, self.q3), (4, self.q4)]:
+            if self.plan.indicator.is_quarter_applicable(quarter):
+                applicable_values.append(value or 0)
+        
+        return sum(applicable_values)
+
+    def get_quarter_value(self, quarter):
+        """Get value for a specific quarter, respecting applicability"""
+        quarter_values = {1: self.q1, 2: self.q2, 3: self.q3, 4: self.q4}
+        if not self.plan.indicator.is_quarter_applicable(quarter):
+            return None  # Not applicable
+        return quarter_values.get(quarter)
 
 
 class PerformanceStatus(models.TextChoices):
@@ -72,7 +91,7 @@ class PerformanceStatus(models.TextChoices):
 class QuarterlyPerformance(models.Model):
     plan = models.ForeignKey(AnnualPlan, on_delete=models.CASCADE, related_name='performances')
     quarter = models.PositiveSmallIntegerField(choices=((1, 'Q1'), (2, 'Q2'), (3, 'Q3'), (4, 'Q4')))
-    value = models.DecimalField(max_digits=20, decimal_places=2, default=0)
+    value = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True)
     status = models.CharField(max_length=20, choices=PerformanceStatus.choices, default=PerformanceStatus.DRAFT)
     submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='submitted_performances')
     submitted_at = models.DateTimeField(null=True, blank=True)
@@ -203,10 +222,14 @@ def within_quarter_submission_window(date: timezone.datetime, quarter: int) -> b
         start = timezone.datetime(year=fy_start_year, month=10, day=11, tzinfo=tz)
         end = timezone.datetime(year=fy_start_year + 1, month=1, day=8, tzinfo=tz)
     elif quarter == 3:
-        start = timezone.datetime(year=fy_start_year + 1, month=1, day=9, tzinfo=tz)
-        end = timezone.datetime(year=fy_start_year + 1, month=4, day=8, tzinfo=tz)
+        start = timezone.datetime(year=fy_start_year + 1, month=4, day=4, tzinfo=tz)
+        end = timezone.datetime(year=fy_start_year + 1, month=4, day=13, tzinfo=tz)
     else:
         start = timezone.datetime(year=fy_start_year + 1, month=4, day=9, tzinfo=tz)
         end = timezone.datetime(year=fy_start_year + 1, month=7, day=7, tzinfo=tz)
-    window_end = end + timezone.timedelta(days=10)
-    return start <= date <= window_end
+    # Q3 has specific end date without extension
+    if quarter == 3:
+        return start <= date <= end
+    else:
+        window_end = end + timezone.timedelta(days=10)
+        return start <= date <= window_end

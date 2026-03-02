@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import api from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { currentEthiopianYear, toGregorianYearFromEthiopian } from '../lib/ethiopian';
+import { formatQuarterValue, formatQuarterValueForInput, convertInputToAPIValue, isQuarterValueNull, isQuarterValueZero } from '../lib/quarterlyUtils';
 
 // Types reused
 type AnnualPlan = {
@@ -33,6 +34,7 @@ type Performance = {
   plan: number;
   quarter: number; // 1..4
   value: string;
+  value_display: string;
   status: string;
   variance_description?: string;
   review_comment?: string;
@@ -131,6 +133,9 @@ export default function Performances() {
       }
       setPerfs(pmap);
       
+      // Auto-create N/A performances for quarters with N/A plans
+      await autoCreateNAPerformances();
+      
       // Update performance window state (overall and per quarter) based on backend configuration
       const win = (winRes as any)?.data;
       if (win && win.performance_windows) {
@@ -218,7 +223,7 @@ export default function Performances() {
 
     for (const p of filtered) {
       const bd = breakdowns[p.id];
-      const perf = (q: 1|2|3|4) => perfs[`${p.id}-${q}`]?.value || '';
+      const perf = (q: 1|2|3|4) => perfs[`${p.id}-${q}`]?.value_display || '';
       const perfS = (q: 1|2|3|4) => perfs[`${p.id}-${q}`]?.status || '';
       rows.push([
         p.sector_name || '',
@@ -293,7 +298,12 @@ export default function Performances() {
     const st = (breakdowns[planId]?.status || 'DRAFT').toUpperCase();
     if (!(st === 'APPROVED' || st === 'VALIDATED' || st === 'FINAL_APPROVED')) return false;
 
+    // Check if the quarterly plan is null/empty for the specific quarter
     if (quarter) {
+      const bd = breakdowns[planId];
+      const quarterPlan = bd ? (bd[`q${quarter}` as const] as string | null) : null;
+      if (!quarterPlan || quarterPlan === '') return false;
+      
       // Respect per-quarter submission window from backend
       if (!perfWindowByQuarter[quarter]) return false;
       const key = `${planId}-${quarter}`;
@@ -317,17 +327,46 @@ export default function Performances() {
     return created;
   };
 
+  const autoCreateNAPerformances = async () => {
+    // Auto-create N/A performances for quarters where the plan is N/A
+    for (const plan of plansCurr) {
+      const bd = breakdowns[plan.id];
+      if (!bd) continue;
+      
+      // Check each quarter
+      for (let quarter: 1|2|3|4 = 1; quarter <= 4; quarter = (quarter + 1) as 1|2|3|4) {
+        const key = `${plan.id}-${quarter}`;
+        const quarterPlan = bd ? (bd[`q${quarter}` as const] as string | null) : null;
+        
+        // If plan is N/A and no performance exists, create N/A performance as SUBMITTED
+        if ((quarterPlan === null || quarterPlan === '' || quarterPlan === 'N/A') && !perfs[key]) {
+          try {
+            const res = await api.post('/api/performances/', { 
+              plan: plan.id, 
+              quarter, 
+              value: 'N/A', 
+              status: 'SUBMITTED' 
+            });
+            const created: Performance = res.data;
+            setPerfs((prev) => ({ ...prev, [key]: created }));
+          } catch (error) {
+            // Log error but don't fail the entire load
+            console.warn(`Failed to auto-create N/A performance for plan ${plan.id}, Q${quarter}:`, error);
+          }
+        }
+      }
+    }
+  };
+
   const savePerformance = async (planId: number, quarter: 1|2|3|4, value: string) => {
     try {
-      const bd = breakdowns[planId] as any;
-      const bdValRaw = bd ? (bd[`q${quarter}`] as string | null) : null;
-      const fallback = (bdValRaw && bdValRaw !== '') ? bdValRaw : '0';
-      const val = value === '' ? Number(fallback || '0').toFixed(2) : Number(value).toFixed(2);
-      const perf = await ensurePerf(planId, quarter, val);
-      await api.put(`/api/performances/${perf.id}/`, { plan: planId, quarter, value: val, status: perf.status });
+      // Convert input value to API format, properly handling N/A vs 0
+      const apiValue = convertInputToAPIValue(value);
+      const perf = await ensurePerf(planId, quarter, apiValue || '0');
+      await api.put(`/api/performances/${perf.id}/`, { plan: planId, quarter, value: apiValue, status: perf.status });
       
       const key = `${planId}-${quarter}`;
-      setPerfs((prev) => ({ ...prev, [key]: { ...(prev[key] || perf), value: val } as Performance }));
+      setPerfs((prev) => ({ ...prev, [key]: { ...(prev[key] || perf), value: apiValue } as Performance }));
       
       setSuccess(`Q${quarter} performance saved`);
       setTimeout(() => setSuccess(null), 3000);
@@ -348,15 +387,12 @@ export default function Performances() {
     try {
       let perf: Performance;
       if (typeof value === 'string') {
-        const bd = breakdowns[planId] as any;
-        const bdValRaw = bd ? (bd[`q${quarter}`] as string | null) : null;
-        const fallback = (bdValRaw && bdValRaw !== '') ? bdValRaw : '0';
-        const val = value === '' ? Number(fallback || '0').toFixed(2) : Number(value).toFixed(2);
-        perf = await ensurePerf(planId, quarter, val);
-        await api.put(`/api/performances/${perf.id}/`, { plan: planId, quarter, value: val, status: perf.status });
+        const apiValue = convertInputToAPIValue(value);
+        perf = await ensurePerf(planId, quarter, apiValue || '0');
+        await api.put(`/api/performances/${perf.id}/`, { plan: planId, quarter, value: apiValue, status: perf.status });
         
         const key = `${planId}-${quarter}`;
-        setPerfs((prev) => ({ ...prev, [key]: { ...(prev[key] || perf), value: val } as Performance }));
+        setPerfs((prev) => ({ ...prev, [key]: { ...(prev[key] || perf), value: apiValue } as Performance }));
       } else {
         perf = await ensurePerf(planId, quarter);
       }
@@ -411,6 +447,8 @@ export default function Performances() {
   };
 
   const getProgressPercentage = (planValue: string, perfValue: string): number => {
+    // Handle N/A case
+    if (planValue === 'N/A') return 0;
     const plan = parseFloat(planValue || '0');
     const perf = parseFloat(perfValue || '0');
     if (plan === 0) return 0;
@@ -419,6 +457,9 @@ export default function Performances() {
   };
 
   const getPerformanceColor = (perfValue: string, planValue: string): string => {
+    // Handle N/A case
+    if (planValue === 'N/A') return 'bg-gray-100 text-gray-500 border border-gray-300';
+    
     const perf = parseFloat(perfValue || '0');
     const plan = parseFloat(planValue || '0');
     if (plan === 0) return 'bg-gray-100 text-gray-700';
@@ -948,25 +989,30 @@ export default function Performances() {
     const bd = breakdowns[p.id];
     const baseline = findPrevBaseline(p.indicator);
     const annualPerf = annualPerformance(p.id);
-    const planQ = (q: 1|2|3|4) => (bd ? (bd[`q${q}` as const] as string | null) : null) ?? '';
-    const perfQ = (q: 1|2|3|4) => perfs[`${p.id}-${q}`]?.value ?? '';
-    const perfS = (q: 1|2|3|4) => perfs[`${p.id}-${q}`]?.status ?? '';
+    const planQ = (q: 1|2|3|4) => {
+    const planValue = (bd ? (bd[`q${q}` as const] as string | null) : null) ?? '';
+    // If plan is null, empty, or undefined, return 'N/A'
+    return planValue === '' || planValue === null ? 'N/A' : planValue;
+  };
+  const perfQ = (q: 1|2|3|4) => perfs[`${p.id}-${q}`]?.value_display ?? '';
+  const perfS = (q: 1|2|3|4) => perfs[`${p.id}-${q}`]?.status ?? '';
 
-    const openPerfModal = (q: 1|2|3|4) => {
-      const existing = String(perfQ(q) || '').trim();
-      const fallback = String(planQ(q) || '').trim();
-      const initial = existing !== '' ? existing : (fallback !== '' ? fallback : '');
-      setPerfModal({ 
-        open: true, 
-        planId: p.id, 
-        quarter: q, 
-        value: initial,
-        indicatorName: p.indicator_name,
-        planValue: planQ(q),
-        annualTarget: p.target,
-        varianceDescription: '',
-      });
-    };
+  const openPerfModal = (q: 1|2|3|4) => {
+    const existing = String(perfQ(q) || '').trim();
+    const fallback = String(planQ(q) || '').trim();
+    // If performance is N/A, use empty string for input; otherwise use existing or fallback
+    const initial = existing === 'N/A' ? '' : (existing !== '' ? existing : (fallback !== 'N/A' ? fallback : ''));
+    setPerfModal({ 
+      open: true, 
+      planId: p.id, 
+      quarter: q, 
+      value: initial,
+      indicatorName: p.indicator_name,
+      planValue: planQ(q),
+      annualTarget: p.target,
+      varianceDescription: '',
+    });
+  };
 
     return (
       <div key={p.id} className="px-6 py-4 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0">

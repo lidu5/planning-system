@@ -292,11 +292,18 @@ class MinisterDashboardView(APIView):
 
     def get(self, request):
         year = request.query_params.get('year')
+        quarter_months = request.query_params.get('quarter_months')
         if year:
             try:
                 year = int(year)
             except ValueError:
                 year = None
+        
+        if quarter_months:
+            try:
+                quarter_months = int(quarter_months)
+            except ValueError:
+                quarter_months = None
 
         # If no year provided, use the most recent year with data
         if not year:
@@ -353,14 +360,28 @@ class MinisterDashboardView(APIView):
         # 1. KPI Cards
         total_annual_target = sum(float(p.target) for p in plans_qs)
         
-        # Total achieved performance (sum of all quarterly performances)
-        total_achieved = sum(float(p.value) for p in perfs_qs)
+        # Total achieved performance (sum of quarterly performances, filtered by quarter_months)
+        if quarter_months:
+            quarter_months_map = {1: 3, 2: 6, 3: 9, 4: 12}
+            filtered_perfs = [
+                p for p in perfs_qs 
+                if quarter_months_map[p.quarter] <= quarter_months
+            ]
+        else:
+            filtered_perfs = perfs_qs
         
-        achievement_percentage = (total_achieved / total_annual_target * 100) if total_annual_target > 0 else 0
+        total_achieved = sum(float(p.value) for p in filtered_perfs if p.value is not None)
+        
+        # Calculate proportional target for achievement percentage
+        target_for_percentage = total_annual_target
+        if quarter_months:
+            target_for_percentage = (total_annual_target * quarter_months) / 12
+        
+        achievement_percentage = (total_achieved / target_for_percentage * 100) if target_for_percentage > 0 else 0
 
-        # Indicators on track vs lagging
+        # Indicators on track vs lagging (using same quarter filtering)
         indicator_performance = {}
-        for perf in perfs_qs:
+        for perf in filtered_perfs:
             plan_id = perf.plan_id
             if plan_id not in indicator_performance:
                 try:
@@ -372,7 +393,12 @@ class MinisterDashboardView(APIView):
                     }
                 except AnnualPlan.DoesNotExist:
                     continue
-            indicator_performance[plan_id]['achieved'] += float(perf.value)
+            indicator_performance[plan_id]['achieved'] += float(perf.value) if perf.value is not None else 0
+
+        # Apply proportional targets for quarter filtering
+        if quarter_months:
+            for plan_id in indicator_performance:
+                indicator_performance[plan_id]['target'] = (indicator_performance[plan_id]['target'] * quarter_months) / 12
 
         on_track = 0
         lagging = 0
@@ -397,12 +423,17 @@ class MinisterDashboardView(APIView):
                 }
             sector_data[sector_id]['target'] += float(plan.target)
 
-        for perf in perfs_qs:
+        # Apply proportional targets for quarter filtering
+        if quarter_months:
+            for sector_id in sector_data:
+                sector_data[sector_id]['target'] = (sector_data[sector_id]['target'] * quarter_months) / 12
+
+        for perf in filtered_perfs:
             try:
                 plan = plans_qs.get(id=perf.plan_id)
                 sector_id = plan.indicator.department.sector.id
                 if sector_id in sector_data:
-                    sector_data[sector_id]['achieved'] += float(perf.value)
+                    sector_data[sector_id]['achieved'] += float(perf.value) if perf.value is not None else 0
             except AnnualPlan.DoesNotExist:
                 continue
 
@@ -418,10 +449,11 @@ class MinisterDashboardView(APIView):
             quarterly_planned['Q3'] += float(bd.q3 or 0)
             quarterly_planned['Q4'] += float(bd.q4 or 0)
 
-        for perf in perfs_qs:
+        # Use filtered performances for quarterly actuals
+        for perf in filtered_perfs:
             q_key = f'Q{perf.quarter}'
             if q_key in quarterly_actual:
-                quarterly_actual[q_key] += float(perf.value)
+                quarterly_actual[q_key] += float(perf.value) if perf.value is not None else 0
 
         quarterly_trend = [
             {'quarter': 'Q1', 'planned': quarterly_planned['Q1'], 'actual': quarterly_actual['Q1']},
@@ -630,11 +662,18 @@ class IndicatorPerformanceView(APIView):
     def get(self, request):
         """Returns hierarchical indicator performance data organized by sector, indicator groups, and indicators."""
         year = request.query_params.get('year')
+        quarter_months = request.query_params.get('quarter_months')
         if year:
             try:
                 year = int(year)
             except ValueError:
                 year = None
+        
+        if quarter_months:
+            try:
+                quarter_months = int(quarter_months)
+            except ValueError:
+                quarter_months = None
 
         # If no year provided, use the most recent year with data
         if not year:
@@ -680,8 +719,23 @@ class IndicatorPerformanceView(APIView):
             
             # Calculate indicator performance
             indicator_perfs = perfs_qs.filter(plan_id=plan_id)
-            total_achieved = sum(float(p.value) for p in indicator_perfs)
+            
+            # Filter performances based on quarter_months selection
+            if quarter_months:
+                quarter_months_map = {1: 3, 2: 6, 3: 9, 4: 12}
+                filtered_perfs = [
+                    p for p in indicator_perfs 
+                    if quarter_months_map[p.quarter] <= quarter_months
+                ]
+            else:
+                filtered_perfs = indicator_perfs
+            
+            total_achieved = sum(float(p.value) for p in filtered_perfs if p.value is not None)
+            
+            # Calculate proportional target based on quarter_months
             target = float(plan.target)
+            if quarter_months:
+                target = (target * quarter_months) / 12
             
             if target > 0:
                 performance_pct = (total_achieved / target) * 100
@@ -792,11 +846,18 @@ class IndicatorDetailView(APIView):
 
         # Get current year for quarterly view
         current_year = request.query_params.get('year')
+        quarter_months = request.query_params.get('quarter_months')
         if current_year:
             try:
                 current_year = int(current_year)
             except ValueError:
                 current_year = None
+        
+        if quarter_months:
+            try:
+                quarter_months = int(quarter_months)
+            except ValueError:
+                quarter_months = None
 
         if not current_year:
             latest_plan = AnnualPlan.objects.filter(indicator_id=indicator_id).order_by('-year').first()
@@ -833,7 +894,7 @@ class IndicatorDetailView(APIView):
                     plan_id=plan.id,
                     status__in=[PerformanceStatus.APPROVED, PerformanceStatus.VALIDATED, PerformanceStatus.FINAL_APPROVED]
                 )
-                achieved = sum(float(p.value) for p in perfs)
+                achieved = sum(float(p.value) for p in perfs if p.value is not None)
                 
                 yearly_data.append({
                     'year': y,
@@ -864,7 +925,16 @@ class IndicatorDetailView(APIView):
                 status__in=[PerformanceStatus.APPROVED, PerformanceStatus.VALIDATED, PerformanceStatus.FINAL_APPROVED]
             )
             
-            for q in [1, 2, 3, 4]:
+            # Determine which quarters to include based on quarter_months
+            quarters_to_include = [1, 2, 3, 4]
+            if quarter_months:
+                quarter_months_map = {1: 3, 2: 6, 3: 9, 4: 12}
+                quarters_to_include = [
+                    q for q in [1, 2, 3, 4] 
+                    if quarter_months_map[q] <= quarter_months
+                ]
+            
+            for q in quarters_to_include:
                 if breakdown:
                     if q == 1:
                         q_target = float(breakdown.q1 or 0)
@@ -878,7 +948,7 @@ class IndicatorDetailView(APIView):
                     q_target = 0
                 
                 q_perf = perfs.filter(quarter=q).first()
-                q_achieved = float(q_perf.value) if q_perf else 0
+                q_achieved = float(q_perf.value) if q_perf and q_perf.value is not None else 0
                 
                 # Calculate performance percentage
                 q_percentage = None

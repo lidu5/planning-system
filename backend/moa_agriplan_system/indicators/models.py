@@ -98,73 +98,26 @@ class IndicatorGroup(models.Model):
         total = AnnualPlan.objects.filter(
             indicator__in=direct_indicators,
             year=year
-        ).aggregate(total=Sum('target'))['total'] or 0
+        ).aggregate(total=Sum('target'))['total']
         
         # Also add aggregates from child groups
         child_groups = self.children.all()
         for child_group in child_groups:
-            total += child_group.get_annual_target_aggregate(year)
+            child_total = child_group.get_annual_target_aggregate(year)
+            if child_total is not None:
+                total = (total or 0) + child_total
         
         return total
 
     def get_quarterly_breakdown_aggregate(self, year):
         """Calculate aggregate quarterly breakdown from all direct child indicators for a given year"""
-        from django.db.models import Sum
-        from plans.models import AnnualPlan, QuarterlyBreakdown
-        
-        # Get all indicators directly in this group
-        direct_indicators = self.indicators.filter(is_aggregatable=True)
-        
-        # Get quarterly breakdowns for these indicators in the given year
-        breakdowns = QuarterlyBreakdown.objects.filter(
-            plan__indicator__in=direct_indicators,
-            plan__year=year
-        ).aggregate(
-            q1=Sum('q1'),
-            q2=Sum('q2'),
-            q3=Sum('q3'),
-            q4=Sum('q4')
-        )
-        
-        result = {
-            'q1': breakdowns['q1'] or 0,
-            'q2': breakdowns['q2'] or 0,
-            'q3': breakdowns['q3'] or 0,
-            'q4': breakdowns['q4'] or 0
-        }
-        
-        # Also add aggregates from child groups
-        child_groups = self.children.all()
-        for child_group in child_groups:
-            child_breakdown = child_group.get_quarterly_breakdown_aggregate(year)
-            result['q1'] += child_breakdown['q1']
-            result['q2'] += child_breakdown['q2']
-            result['q3'] += child_breakdown['q3']
-            result['q4'] += child_breakdown['q4']
-        
-        return result
+        from .aggregation_utils import get_group_quarterly_breakdown_aggregate
+        return get_group_quarterly_breakdown_aggregate(self, year)
 
     def get_performance_aggregate(self, year, quarter):
         """Calculate aggregate performance from all direct child indicators for a given year and quarter"""
-        from django.db.models import Sum
-        from plans.models import QuarterlyPerformance
-        
-        # Get all indicators directly in this group
-        direct_indicators = self.indicators.filter(is_aggregatable=True)
-        
-        # Get performance data for these indicators in the given year and quarter
-        total = QuarterlyPerformance.objects.filter(
-            plan__indicator__in=direct_indicators,
-            plan__year=year,
-            quarter=quarter
-        ).aggregate(total=Sum('value'))['total'] or 0
-        
-        # Also add aggregates from child groups
-        child_groups = self.children.all()
-        for child_group in child_groups:
-            total += child_group.get_performance_aggregate(year, quarter)
-        
-        return total
+        from .aggregation_utils import get_group_performance_aggregate
+        return get_group_performance_aggregate(self, year, quarter)
 
 
 class Indicator(models.Model):
@@ -176,6 +129,10 @@ class Indicator(models.Model):
     is_aggregatable = models.BooleanField(
         default=True,
         help_text="Whether this indicator's value should be included in parent group calculations"
+    )
+    applicable_quarters = models.JSONField(
+        default=list,
+        help_text="List of applicable quarters: [1, 2, 3, 4]. Empty list means all quarters apply"
     )
 
     class Meta:
@@ -214,3 +171,13 @@ class Indicator(models.Model):
             'level': None,
             'unit': self.unit
         }
+
+    def is_quarter_applicable(self, quarter):
+        """Check if a quarter is applicable for this indicator"""
+        if not self.applicable_quarters:
+            return True  # All quarters apply if list is empty
+        return quarter in self.applicable_quarters
+
+    def get_applicable_quarters(self):
+        """Get list of applicable quarters"""
+        return self.applicable_quarters or [1, 2, 3, 4]

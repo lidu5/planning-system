@@ -99,7 +99,7 @@ class IndicatorGroupSerializer(serializers.ModelSerializer):
 
     def get_annual_target_aggregate(self, obj):
         request = self.context.get('request')
-        if request and request.query_params.get('include_aggregates'):
+        if request and hasattr(request, 'query_params') and request.query_params.get('include_aggregates'):
             year = request.query_params.get('year')
             if year:
                 return obj.get_annual_target_aggregate(int(year))
@@ -107,7 +107,7 @@ class IndicatorGroupSerializer(serializers.ModelSerializer):
 
     def get_quarterly_breakdown_aggregate(self, obj):
         request = self.context.get('request')
-        if request and request.query_params.get('include_aggregates'):
+        if request and hasattr(request, 'query_params') and request.query_params.get('include_aggregates'):
             year = request.query_params.get('year')
             if year:
                 return obj.get_quarterly_breakdown_aggregate(int(year))
@@ -115,7 +115,7 @@ class IndicatorGroupSerializer(serializers.ModelSerializer):
 
     def get_performance_aggregate(self, obj):
         request = self.context.get('request')
-        if request and request.query_params.get('include_aggregates'):
+        if request and hasattr(request, 'query_params') and request.query_params.get('include_aggregates'):
             year = request.query_params.get('year')
             quarter = request.query_params.get('quarter')
             if year and quarter:
@@ -139,12 +139,18 @@ class IndicatorSerializer(serializers.ModelSerializer):
     )
     effective_unit = serializers.ReadOnlyField()
     hierarchy_context = serializers.SerializerMethodField()
+    applicable_quarters = serializers.ListField(
+        child=serializers.IntegerField(min_value=1, max_value=4),
+        required=False,
+        allow_empty=True
+    )
 
     class Meta:
         model = Indicator
         fields = [
             'id', 'name', 'unit', 'description', 'department', 'department_id', 
-            'groups', 'group_ids', 'is_aggregatable', 'effective_unit', 'hierarchy_context'
+            'groups', 'group_ids', 'is_aggregatable', 'effective_unit', 'hierarchy_context',
+            'applicable_quarters'
         ]
 
     def get_hierarchy_context(self, obj):
