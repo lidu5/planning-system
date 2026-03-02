@@ -981,7 +981,7 @@ export default function AnnualPlans() {
 
                   {/* Departments - Animated Collapse */}
                   <div className={`overflow-hidden transition-all duration-300 ${
-                    expandedGroups.has(sKey) ? 'max-h-[5000px] opacity-100' : 'max-h-0 opacity-0'
+                    expandedGroups.has(sKey) ? 'opacity-100' : 'max-h-0 opacity-0'
                   }`}>
                     {Object.entries(sVal.departments).map(([dKey, dVal]) => (
                       <div key={dKey} className="border-t border-gray-100">
@@ -1011,7 +1011,7 @@ export default function AnnualPlans() {
                         <div className={`overflow-hidden transition-all duration-300 ${
                           expandedGroups.has(`${sKey}-${dKey}`) ? 'opacity-100' : 'max-h-0 opacity-0'
                         }`}>
-                          <div className="px-6 py-4 bg-gray-50/50 max-h-[80vh] overflow-y-auto">
+                          <div className="px-6 py-4 bg-gray-50/50 overflow-y-auto">
                             {/* Grouped Indicators */}
                             {(() => {
                               const groupsMap = new Map<string, AnnualPlan[]>();
