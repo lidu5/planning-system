@@ -175,6 +175,19 @@ def state_minister_dashboard(request):
     """
     user = request.user
     year = request.query_params.get('year')
+    quarter_months = request.query_params.get('quarter_months')
+    
+    if year:
+        try:
+            year = int(year)
+        except ValueError:
+            year = None
+    
+    if quarter_months:
+        try:
+            quarter_months = int(quarter_months)
+        except ValueError:
+            quarter_months = None
     
     # Get user's sector
     sector_id = None
@@ -211,52 +224,136 @@ def state_minister_dashboard(request):
         groups__isnull=True
     ).select_related('department')
     
-    # Helper function to calculate group performance using model methods
-    def calculate_group_performance(group, year):
-        # Use the model's recursive aggregation methods
-        annual_target = group.get_annual_target_aggregate(year)
-        quarterly_breakdown = group.get_quarterly_breakdown_aggregate(year)
+    # Helper function to calculate individual indicator performance percentage
+    def calculate_indicator_percentage(indicator, year):
+        """Calculate a single indicator's performance percentage."""
+        annual_plan = AnnualPlan.objects.filter(indicator=indicator, year=year).first()
+        if not annual_plan:
+            return None
         
-        # Calculate total performance across all quarters
-        total_performance = 0
-        for quarter in range(1, 5):
-            quarter_performance = group.get_performance_aggregate(year, quarter)
-            if quarter_performance is not None:
-                total_performance += quarter_performance
+        breakdown = QuarterlyBreakdown.objects.filter(plan=annual_plan).first()
         
-        performance_percentage = (total_performance / annual_target * 100) if annual_target and annual_target > 0 else None
+        if quarter_months:
+            quarter_months_map = {1: 3, 2: 6, 3: 9, 4: 12}
+            filtered_quarters = [
+                q for q in [1, 2, 3, 4]
+                if quarter_months_map[q] <= quarter_months
+            ]
+            performance = QuarterlyPerformance.objects.filter(
+                plan=annual_plan, quarter__in=filtered_quarters
+            ).aggregate(total=Sum('value'))['total'] or 0
+            
+            quarterly_target = 0
+            if breakdown:
+                if quarter_months == 3:
+                    quarterly_target = float(breakdown.q1 or 0)
+                elif quarter_months == 6:
+                    quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0)
+                elif quarter_months == 9:
+                    quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0) + float(breakdown.q3 or 0)
+                elif quarter_months == 12:
+                    quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0) + float(breakdown.q3 or 0) + float(breakdown.q4 or 0)
+            else:
+                quarterly_target = (float(annual_plan.target) * quarter_months) / 12
+            target = quarterly_target
+        else:
+            performance = QuarterlyPerformance.objects.filter(plan=annual_plan).aggregate(
+                total=Sum('value')
+            )['total'] or 0
+            target = float(annual_plan.target) if annual_plan.target else 0
+        
+        if target > 0:
+            return (float(performance) / float(target)) * 100
+        return None
+
+    # Helper function to calculate group performance using average-of-percentages
+    def calculate_group_performance(group, year, children_data=None):
+        """
+        Calculate group performance as the average of:
+        - Direct indicator percentages (is_aggregatable=True only)
+        - Child group percentages (recursively)
+        """
+        percentages = []
+        
+        # Collect direct indicator percentages (only aggregatable)
+        for indicator in group.indicators.filter(is_aggregatable=True):
+            pct = calculate_indicator_percentage(indicator, year)
+            if pct is not None:
+                percentages.append(pct)
+        
+        # Collect child group percentages
+        if children_data:
+            for child in children_data:
+                if child.get('performance_percentage') is not None:
+                    percentages.append(child['performance_percentage'])
+        
+        performance_percentage = (sum(percentages) / len(percentages)) if percentages else None
         
         return {
-            'annual_target_aggregate': annual_target,
-            'performance_aggregate': total_performance,
             'performance_percentage': performance_percentage,
-            'quarterly_breakdown_aggregate': quarterly_breakdown
+            'total_components': len(percentages),
         }
     
-    # Helper function to build group tree with performance
+    # Helper function to build group tree with performance (bottom-up)
     def build_group_tree(groups, year):
         result = []
         for group in groups:
-            performance_data = calculate_group_performance(group, year)
+            # Build children FIRST (bottom-up) so we have their percentages
+            children_data = build_group_tree(group.children.all(), year)
             
             # Get indicators with their performance
             indicators_data = []
             for indicator in group.indicators.all():
                 annual_plan = AnnualPlan.objects.filter(indicator=indicator, year=year).first()
                 if annual_plan:
-                    performance = QuarterlyPerformance.objects.filter(plan=annual_plan).aggregate(
-                        total=Sum('value')
-                    )['total'] or 0
+                    # Get quarterly breakdown for target calculation
+                    breakdown = QuarterlyBreakdown.objects.filter(plan=annual_plan).first()
+                    
+                    if quarter_months:
+                        # Filter performance for specified months
+                        quarter_months_map = {1: 3, 2: 6, 3: 9, 4: 12}
+                        filtered_quarters = [
+                            q for q in [1, 2, 3, 4] 
+                            if quarter_months_map[q] <= quarter_months
+                        ]
+                        performance = QuarterlyPerformance.objects.filter(
+                            plan=annual_plan, quarter__in=filtered_quarters
+                        ).aggregate(total=Sum('value'))['total'] or 0
+                        
+                        # Calculate quarterly target
+                        quarterly_target = 0
+                        if breakdown:
+                            if quarter_months == 3:
+                                quarterly_target = float(breakdown.q1 or 0)
+                            elif quarter_months == 6:
+                                quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0)
+                            elif quarter_months == 9:
+                                quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0) + float(breakdown.q3 or 0)
+                        else:
+                            # Fallback to proportional
+                            quarterly_target = (float(annual_plan.target) * quarter_months) / 12
+                        
+                        target = quarterly_target
+                    else:
+                        # Get all quarters performance
+                        performance = QuarterlyPerformance.objects.filter(plan=annual_plan).aggregate(
+                            total=Sum('value')
+                        )['total'] or 0
+                        target = annual_plan.target
                     
                     indicators_data.append({
                         'id': indicator.id,
                         'name': indicator.name,
                         'unit': indicator.unit,
                         'description': indicator.description,
-                        'target': annual_plan.target,
+                        'is_aggregatable': indicator.is_aggregatable,
+                        'target': target,
                         'achieved': performance,
-                        'performance_percentage': (performance / annual_plan.target * 100) if annual_plan.target > 0 else None
+                        'performance_percentage': (performance / target * 100) if target > 0 else None
                     })
+            
+            # Calculate group performance using average-of-percentages (bottom-up)
+            performance_data = calculate_group_performance(group, year, children_data)
             
             group_data = {
                 'id': group.id,
@@ -264,7 +361,7 @@ def state_minister_dashboard(request):
                 'level': group.level,
                 'hierarchy_path': group.hierarchy_path,
                 'is_parent': group.is_parent,
-                'children': build_group_tree(group.children.all(), year),
+                'children': children_data,
                 'indicators': indicators_data,
                 **performance_data
             }
@@ -279,18 +376,50 @@ def state_minister_dashboard(request):
     for indicator in ungrouped_indicators:
         annual_plan = AnnualPlan.objects.filter(indicator=indicator, year=year).first()
         if annual_plan:
-            performance = QuarterlyPerformance.objects.filter(plan=annual_plan).aggregate(
-                total=Sum('value')
-            )['total'] or 0
+            # Get quarterly breakdown for target calculation
+            breakdown = QuarterlyBreakdown.objects.filter(plan=annual_plan).first()
+            
+            if quarter_months:
+                # Filter performance for specified months
+                quarter_months_map = {1: 3, 2: 6, 3: 9, 4: 12}
+                filtered_quarters = [
+                    q for q in [1, 2, 3, 4] 
+                    if quarter_months_map[q] <= quarter_months
+                ]
+                performance = QuarterlyPerformance.objects.filter(
+                    plan=annual_plan, quarter__in=filtered_quarters
+                ).aggregate(total=Sum('value'))['total'] or 0
+                
+                # Calculate quarterly target
+                quarterly_target = 0
+                if breakdown:
+                    if quarter_months == 3:
+                        quarterly_target = float(breakdown.q1 or 0)
+                    elif quarter_months == 6:
+                        quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0)
+                    elif quarter_months == 9:
+                        quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0) + float(breakdown.q3 or 0)
+                else:
+                    # Fallback to proportional
+                    quarterly_target = (float(annual_plan.target) * quarter_months) / 12
+                
+                target = quarterly_target
+            else:
+                # Get all quarters performance
+                performance = QuarterlyPerformance.objects.filter(plan=annual_plan).aggregate(
+                    total=Sum('value')
+                )['total'] or 0
+                target = annual_plan.target
             
             ungrouped_data.append({
                 'id': indicator.id,
                 'name': indicator.name,
                 'unit': indicator.unit,
                 'description': indicator.description,
-                'target': annual_plan.target,
+                'is_aggregatable': indicator.is_aggregatable,
+                'target': target,
                 'achieved': performance,
-                'performance_percentage': (performance / annual_plan.target * 100) if annual_plan.target > 0 else None
+                'performance_percentage': (performance / target * 100) if target > 0 else None
             })
     
     # Calculate KPIs
@@ -304,16 +433,13 @@ def state_minister_dashboard(request):
     all_indicators.extend(ungrouped_data)
     
     total_indicators = len(all_indicators)
-    total_target = sum(ind['target'] for ind in all_indicators)
-    total_achieved = sum(ind['achieved'] for ind in all_indicators)
-    overall_performance = (total_achieved / total_target * 100) if total_target > 0 else None
     
     # Count groups on track vs lagging
     def count_group_performance(groups):
         on_track = 0
         lagging = 0
         for group in groups:
-            if group['performance_percentage'] is not None:
+            if group.get('performance_percentage') is not None:
                 if group['performance_percentage'] >= 85:
                     on_track += 1
                 else:
@@ -325,7 +451,7 @@ def state_minister_dashboard(request):
     
     groups_on_track, groups_lagging = count_group_performance(root_groups_data)
     
-    # Get department performance and quarterly trends
+    # Get department performance using average-of-percentages
     department_performance = []
     quarterly_trends = []
     
@@ -333,53 +459,45 @@ def state_minister_dashboard(request):
     departments = Department.objects.filter(sector_id=sector_id)
     
     for dept in departments:
-        # Get all indicators for this department
-        dept_indicators = Indicator.objects.filter(department=dept)
+        # Get all indicators for this department that are aggregatable
+        dept_indicators = Indicator.objects.filter(department=dept, is_aggregatable=True)
         
-        # Calculate department performance metrics
-        total_target = 0
-        total_achieved = 0
-        indicator_count = 0
+        # Calculate each indicator's percentage individually
+        indicator_percentages = []
+        indicator_count_dept = 0
         
         for indicator in dept_indicators:
-            annual_plan = AnnualPlan.objects.filter(indicator=indicator, year=year).first()
-            if annual_plan:
-                total_target += annual_plan.target
-                # Get performance for all quarters
-                quarterly_perf = QuarterlyPerformance.objects.filter(plan=annual_plan).aggregate(
-                    total=Sum('value')
-                )['total'] or 0
-                total_achieved += quarterly_perf
-                indicator_count += 1
+            pct = calculate_indicator_percentage(indicator, year)
+            indicator_count_dept += 1
+            if pct is not None:
+                indicator_percentages.append(pct)
         
-        # Calculate average performance percentage
-        avg_performance = (total_achieved / total_target * 100) if total_target > 0 else None
+        # Department performance = average of indicator percentages
+        avg_performance = (sum(indicator_percentages) / len(indicator_percentages)) if indicator_percentages else None
         
         # Add to department performance list
-        if indicator_count > 0:
+        if indicator_count_dept > 0:
             department_performance.append({
                 'department_id': dept.id,
                 'department_name': dept.name,
                 'average_performance': avg_performance,
-                'total_indicators': indicator_count,
-                'total_target': total_target,
-                'total_achieved': total_achieved,
+                'total_indicators': indicator_count_dept,
             })
             
             # Generate simplified quarterly trend data for this department
             for quarter in range(1, 5):
-                # Simplified quarterly calculation
-                quarter_target = float(total_target / 4)  # Convert to float and distribute evenly across quarters
-                quarter_achieved = float(total_achieved / 4)  # Convert to float and distribute evenly
-                quarter_performance = (quarter_achieved / quarter_target * 100) if quarter_target > 0 else 0
-                
                 quarterly_trends.append({
                     'quarter': f'Q{quarter}',
                     'department_name': dept.name,
-                    'target': quarter_target,
-                    'achieved': quarter_achieved,
-                    'performance_percentage': quarter_performance,
+                    'performance_percentage': avg_performance,
                 })
+    
+    # Sector overall performance = average of department percentages
+    dept_percentages = [
+        d['average_performance'] for d in department_performance
+        if d['average_performance'] is not None
+    ]
+    overall_performance = (sum(dept_percentages) / len(dept_percentages)) if dept_percentages else None
     
     # Get sector info
     sector = StateMinisterSector.objects.filter(id=sector_id).first()
@@ -393,8 +511,6 @@ def state_minister_dashboard(request):
         'ungrouped_indicators': ungrouped_data,
         'kpis': {
             'total_indicators': total_indicators,
-            'total_target': total_target,
-            'total_achieved': total_achieved,
             'overall_performance': overall_performance,
             'groups_on_track': groups_on_track,
             'groups_lagging': groups_lagging,
