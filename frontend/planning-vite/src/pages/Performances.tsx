@@ -133,8 +133,8 @@ export default function Performances() {
       }
       setPerfs(pmap);
       
-      // Auto-create N/A performances for quarters with N/A plans
-      await autoCreateNAPerformances();
+      // Auto-create N/A performances for quarters with N/A plans (pass fresh data, not stale state)
+      await autoCreateNAPerformances(currPlans, map, pmap);
       
       // Update performance window state (overall and per quarter) based on backend configuration
       const win = (winRes as any)?.data;
@@ -293,24 +293,31 @@ export default function Performances() {
 
   const canEditPerformance = (planId: number, quarter?: 1|2|3|4): boolean => {
     const role = (user?.role || '').toUpperCase();
-    if (!perfWindowOpen) return false;
     if (role !== 'LEAD_EXECUTIVE_BODY') return false;
-    const st = (breakdowns[planId]?.status || 'DRAFT').toUpperCase();
-    if (!(st === 'APPROVED' || st === 'VALIDATED' || st === 'FINAL_APPROVED')) return false;
 
-    // Check if the quarterly plan is null/empty for the specific quarter
     if (quarter) {
       const bd = breakdowns[planId];
       const quarterPlan = bd ? (bd[`q${quarter}` as const] as string | null) : null;
-      if (!quarterPlan || quarterPlan === '') return false;
-      
-      // Respect per-quarter submission window from backend
-      if (!perfWindowByQuarter[quarter]) return false;
       const key = `${planId}-${quarter}`;
       const perfStatus = (perfs[key]?.status || 'DRAFT').toUpperCase();
+
+      // N/A quarter (null/empty plan): only allow editing if rejected
+      if (!quarterPlan || quarterPlan === '') {
+        return perfStatus === 'REJECTED';
+      }
+
+      // Regular quarter: require window open, approved breakdown, and draft/rejected status
+      if (!perfWindowOpen) return false;
+      const st = (breakdowns[planId]?.status || 'DRAFT').toUpperCase();
+      if (!(st === 'APPROVED' || st === 'VALIDATED' || st === 'FINAL_APPROVED')) return false;
+      if (!perfWindowByQuarter[quarter]) return false;
       return perfStatus === 'DRAFT' || perfStatus === 'REJECTED';
     }
-    return true;
+
+    // No quarter specified (e.g. banner check): require window open + approved breakdown
+    if (!perfWindowOpen) return false;
+    const st = (breakdowns[planId]?.status || 'DRAFT').toUpperCase();
+    return st === 'APPROVED' || st === 'VALIDATED' || st === 'FINAL_APPROVED';
   };
 
   const canSubmitPerformance = (): boolean => {
@@ -327,10 +334,14 @@ export default function Performances() {
     return created;
   };
 
-  const autoCreateNAPerformances = async () => {
+  const autoCreateNAPerformances = async (
+    plans: AnnualPlan[],
+    bds: Record<number, Breakdown>,
+    perfMap: Record<string, Performance>
+  ) => {
     // Auto-create N/A performances for quarters where the plan is N/A
-    for (const plan of plansCurr) {
-      const bd = breakdowns[plan.id];
+    for (const plan of plans) {
+      const bd = bds[plan.id];
       if (!bd) continue;
       
       // Check each quarter
@@ -338,8 +349,9 @@ export default function Performances() {
         const key = `${plan.id}-${quarter}`;
         const quarterPlan = bd ? (bd[`q${quarter}` as const] as string | null) : null;
         
-        // If plan is N/A and no performance exists, create N/A performance as SUBMITTED
-        if ((quarterPlan === null || quarterPlan === '' || quarterPlan === 'N/A') && !perfs[key]) {
+        // Only auto-create N/A performance for quarters whose plan is N/A (null or empty).
+        // Quarters with an actual plan value must never be auto-created as N/A.
+        if ((quarterPlan === null || quarterPlan === '') && !perfMap[key]) {
           try {
             const res = await api.post('/api/performances/', { 
               plan: plan.id, 
@@ -348,6 +360,7 @@ export default function Performances() {
               status: 'SUBMITTED' 
             });
             const created: Performance = res.data;
+            perfMap[key] = created;
             setPerfs((prev) => ({ ...prev, [key]: created }));
           } catch (error) {
             // Log error but don't fail the entire load
@@ -413,6 +426,20 @@ export default function Performances() {
       } else {
         setError(detail || 'Submit performance failed');
       }
+    }
+  };
+
+  const resubmitNAPerformance = async (planId: number, quarter: 1|2|3|4) => {
+    const key = `${planId}-${quarter}`;
+    const perf = perfs[key];
+    if (!perf?.id) return;
+    try {
+      await api.post(`/api/performances/${perf.id}/submit/`, {});
+      setSuccess(`Q${quarter} N/A performance re-submitted for review`);
+      setTimeout(() => setSuccess(null), 3000);
+      await loadData();
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || 'Re-submit failed');
     }
   };
 
@@ -990,29 +1017,29 @@ export default function Performances() {
     const baseline = findPrevBaseline(p.indicator);
     const annualPerf = annualPerformance(p.id);
     const planQ = (q: 1|2|3|4) => {
-    const planValue = (bd ? (bd[`q${q}` as const] as string | null) : null) ?? '';
-    // If plan is null, empty, or undefined, return 'N/A'
-    return planValue === '' || planValue === null ? 'N/A' : planValue;
-  };
-  const perfQ = (q: 1|2|3|4) => perfs[`${p.id}-${q}`]?.value_display ?? '';
-  const perfS = (q: 1|2|3|4) => perfs[`${p.id}-${q}`]?.status ?? '';
+      const planValue = (bd ? (bd[`q${q}` as const] as string | null) : null) ?? '';
+      // If plan is null, empty, or undefined, return 'N/A'
+      return planValue === '' || planValue === null ? 'N/A' : planValue;
+    };
+    const perfQ = (q: 1|2|3|4) => perfs[`${p.id}-${q}`]?.value_display ?? '';
+    const perfS = (q: 1|2|3|4) => perfs[`${p.id}-${q}`]?.status ?? '';
 
-  const openPerfModal = (q: 1|2|3|4) => {
-    const existing = String(perfQ(q) || '').trim();
-    const fallback = String(planQ(q) || '').trim();
-    // If performance is N/A, use empty string for input; otherwise use existing or fallback
-    const initial = existing === 'N/A' ? '' : (existing !== '' ? existing : (fallback !== 'N/A' ? fallback : ''));
-    setPerfModal({ 
-      open: true, 
-      planId: p.id, 
-      quarter: q, 
-      value: initial,
-      indicatorName: p.indicator_name,
-      planValue: planQ(q),
-      annualTarget: p.target,
-      varianceDescription: '',
-    });
-  };
+    const openPerfModal = (q: 1|2|3|4) => {
+      const existing = String(perfQ(q) || '').trim();
+      const fallback = String(planQ(q) || '').trim();
+      // If performance is N/A, use empty string for input; otherwise use existing or fallback
+      const initial = existing === 'N/A' ? '' : (existing !== '' ? existing : (fallback !== 'N/A' ? fallback : ''));
+      setPerfModal({ 
+        open: true, 
+        planId: p.id, 
+        quarter: q, 
+        value: initial,
+        indicatorName: p.indicator_name,
+        planValue: planQ(q),
+        annualTarget: p.target,
+        varianceDescription: '',
+      });
+    };
 
     return (
       <div key={p.id} className="px-6 py-4 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-0">
@@ -1102,10 +1129,10 @@ export default function Performances() {
                             ? 'hover:shadow-sm hover:scale-[1.02] cursor-pointer' 
                             : 'cursor-not-allowed'
                         }`}
-                        title={qValue || 'N/A'}
+                        title={qPlan === 'N/A' && (!qValue || qValue === 'N/A') ? 'N/A' : (qValue || '-')}
                       >
                         <div className="text-xs mb-1">Performance</div>
-                        <div className="font-semibold">{qValue || 'N/A'}</div>
+                        <div className="font-semibold">{qPlan === 'N/A' && (!qValue || qValue === 'N/A') ? 'N/A' : (qValue || '-')}</div>
                         {qPlan && parseFloat(qPlan) > 0 && (
                           <div className="mt-1 text-[11px] text-gray-700 opacity-80">
                             {progress.toFixed(1)}% of plan
@@ -1127,28 +1154,39 @@ export default function Performances() {
                       {perfs[`${p.id}-${q}`] && (
                         <div className="flex flex-col items-center gap-1">
                           {statusBadge(qStatus)}
-                          
-                          {/* Rejection Note Button */}
+
+                          {/* Rejection Note + Re-submit buttons */}
                           {qStatus.toUpperCase() === 'REJECTED' && (
-                            <button
-                              onClick={() => {
-                                const perf = perfs[`${p.id}-${q}`];
-                                if (perf?.review_comment) {
-                                  setRejectionModal({
-                                    open: true,
-                                    title: `Performance Rejection - Q${q}`,
-                                    note: perf.review_comment || '',
-                                    by: perf.reviewed_by_name || perf.rejected_by_name || '',
-                                    at: perf.reviewed_at || perf.rejected_at || '',
-                                    quarter: q,
-                                    indicatorName: p.indicator_name
-                                  });
-                                }
-                              }}
-                              className="text-xs text-red-600 hover:text-red-800 hover:underline"
-                            >
-                              View note
-                            </button>
+                            <>
+                              <button
+                                onClick={() => {
+                                  const perf = perfs[`${p.id}-${q}`];
+                                  if (perf?.review_comment) {
+                                    setRejectionModal({
+                                      open: true,
+                                      title: `Performance Rejection - Q${q}`,
+                                      note: perf.review_comment || '',
+                                      by: perf.reviewed_by_name || perf.rejected_by_name || '',
+                                      at: perf.reviewed_at || perf.rejected_at || '',
+                                      quarter: q,
+                                      indicatorName: p.indicator_name
+                                    });
+                                  }
+                                }}
+                                className="text-xs text-red-600 hover:text-red-800 hover:underline"
+                              >
+                                View note
+                              </button>
+                              {/* Re-submit button for rejected N/A performances */}
+                              {qPlan === 'N/A' && (user?.role || '').toUpperCase() === 'LEAD_EXECUTIVE_BODY' && (
+                                <button
+                                  onClick={() => resubmitNAPerformance(p.id, q as 1|2|3|4)}
+                                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                                >
+                                  Re-submit N/A
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       )}

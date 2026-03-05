@@ -703,35 +703,42 @@ class QuarterlyPerformanceViewSet(viewsets.ModelViewSet):
         if obj.status not in [PerformanceStatus.DRAFT, PerformanceStatus.REJECTED]:
             return Response({'detail': 'Only draft or rejected performance can be submitted.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if not within_quarter_submission_window(now, obj.quarter):
-            return Response({'detail': 'Submission window closed (10 days after quarter end).'}, status=status.HTTP_400_BAD_REQUEST)
+        # N/A performances (value is None) bypass window and breakdown checks,
+        # consistent with how create() and update() handle them.
+        is_na_performance = obj.value is None
 
-        # Ensure the related quarterly breakdown plan is APPROVED by the State Minister
-        bd = QuarterlyBreakdown.objects.filter(plan=obj.plan).first()
-        if not bd or bd.status not in [PlanStatus.APPROVED, PlanStatus.VALIDATED, PlanStatus.FINAL_APPROVED]:
-            return Response({'detail': 'Quarterly performance cannot be submitted until the corresponding quarterly breakdown plan is approved by the State Minister.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not is_na_performance:
+            if not within_quarter_submission_window(now, obj.quarter):
+                return Response({'detail': 'Submission window closed (10 days after quarter end).'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Ensure the related quarterly breakdown plan is APPROVED by the State Minister
+            bd = QuarterlyBreakdown.objects.filter(plan=obj.plan).first()
+            if not bd or bd.status not in [PlanStatus.APPROVED, PlanStatus.VALIDATED, PlanStatus.FINAL_APPROVED]:
+                return Response({'detail': 'Quarterly performance cannot be submitted until the corresponding quarterly breakdown plan is approved by the State Minister.'}, status=status.HTTP_400_BAD_REQUEST)
 
         # When the quarter performance is <84% or >110% of the quarterly target,
         # require the submitting Lead Executive Body to provide a description.
-        q_target = None
-        if obj.quarter == 1:
-            q_target = bd.q1 or 0
-        elif obj.quarter == 2:
-            q_target = bd.q2 or 0
-        elif obj.quarter == 3:
-            q_target = bd.q3 or 0
-        elif obj.quarter == 4:
-            q_target = bd.q4 or 0
+        # N/A performances have no numeric value so this check is skipped.
+        if not is_na_performance:
+            q_target = None
+            if obj.quarter == 1:
+                q_target = bd.q1 or 0
+            elif obj.quarter == 2:
+                q_target = bd.q2 or 0
+            elif obj.quarter == 3:
+                q_target = bd.q3 or 0
+            elif obj.quarter == 4:
+                q_target = bd.q4 or 0
 
-        # Only perform the check when the quarterly target is positive.
-        from decimal import Decimal
-        if q_target and Decimal(q_target) > 0:
-            perf_pct = (Decimal(obj.value) / Decimal(q_target)) * Decimal('100')
-            if perf_pct < Decimal('84') or perf_pct > Decimal('110'):
-                variance_description = (request.data.get('variance_description') or '').strip()
-                if not variance_description:
-                    return Response({'detail': 'Variance description is required when quarterly performance is less than 84% or greater than 110% of the target.'}, status=status.HTTP_400_BAD_REQUEST)
-                obj.variance_description = variance_description
+            # Only perform the check when the quarterly target is positive.
+            from decimal import Decimal
+            if q_target and Decimal(q_target) > 0:
+                perf_pct = (Decimal(obj.value) / Decimal(q_target)) * Decimal('100')
+                if perf_pct < Decimal('84') or perf_pct > Decimal('110'):
+                    variance_description = (request.data.get('variance_description') or '').strip()
+                    if not variance_description:
+                        return Response({'detail': 'Variance description is required when quarterly performance is less than 84% or greater than 110% of the target.'}, status=status.HTTP_400_BAD_REQUEST)
+                    obj.variance_description = variance_description
 
         # Set status to SUBMITTED (goes directly to State Minister)
         # Advisors can still view and comment, but their verification is not required
