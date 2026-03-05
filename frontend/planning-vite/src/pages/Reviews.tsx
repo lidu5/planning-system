@@ -120,6 +120,37 @@ export default function Reviews() {
 
   const isMinister = (user?.role || '').toUpperCase() === 'STATE_MINISTER';
 
+  const autoCreateNAPerformances = async () => {
+    // Auto-create N/A performances for quarters where the plan is N/A
+    for (const plan of plans) {
+      const bd = breakdowns.find(b => b.plan === plan.id);
+      if (!bd) continue;
+      
+      for (let quarter: 1|2|3|4 = 1; quarter <= 4; quarter++) {
+        const quarterPlan = bd ? (bd[`q${quarter}` as keyof Breakdown] as string | null) : null;
+        
+        // If plan is N/A and no performance exists, create N/A performance as SUBMITTED
+        if ((quarterPlan === null || quarterPlan === '' || quarterPlan === 'N/A') && !perfs.find(p => p.plan === plan.id && p.quarter === quarter)) {
+          console.log(`Creating N/A performance for plan ${plan.id}, Q${quarter}, planValue: ${quarterPlan}`);
+          try {
+            const res = await api.post('/api/performances/115/submit/', { 
+              plan: plan.id, 
+              quarter, 
+              value: 'N/A', 
+              status: 'SUBMITTED' 
+            });
+            const created: Performance = res.data;
+            console.log(`Successfully created N/A performance:`, created);
+            setPerfs((prev) => [...prev, created]);
+          } catch (error) {
+            // Log error but don't fail entire load
+            console.warn(`Failed to auto-create N/A performance for plan ${plan.id}, Q${quarter}:`, error);
+          }
+        }
+      }
+    }
+  };
+
   const loadData = async (showRefresh = false) => {
     if (showRefresh) {
       setRefreshing(true);
@@ -142,6 +173,19 @@ export default function Reviews() {
       setPlans(plansRes.data || []);
       setBreakdowns(bRes.data || []);
       setPerfs(pRes.data || []);
+
+      // Add a small delay to ensure state is updated before auto-creation
+      setTimeout(async () => {
+        console.log('Starting auto-creation of N/A performances...');
+        console.log('Data loaded:', { 
+          plansCount: plansRes.data?.length || 0, 
+          breakdownsCount: bRes.data?.length || 0, 
+          perfsCount: pRes.data?.length || 0 
+        });
+        
+        // Auto-create N/A performances for State Minister view
+        await autoCreateNAPerformances();
+      }, 100);
 
       const role = (user?.role || '').toUpperCase();
       if (role === 'STATE_MINISTER' && summaryRes && summaryRes.data) {

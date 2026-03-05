@@ -1102,10 +1102,10 @@ export default function Performances() {
                             ? 'hover:shadow-sm hover:scale-[1.02] cursor-pointer' 
                             : 'cursor-not-allowed'
                         }`}
-                        title={qValue || '-'}
+                        title={qValue || 'N/A'}
                       >
                         <div className="text-xs mb-1">Performance</div>
-                        <div className="font-semibold">{qValue || '-'}</div>
+                        <div className="font-semibold">{qValue || 'N/A'}</div>
                         {qPlan && parseFloat(qPlan) > 0 && (
                           <div className="mt-1 text-[11px] text-gray-700 opacity-80">
                             {progress.toFixed(1)}% of plan
@@ -1124,7 +1124,7 @@ export default function Performances() {
                       </button>
 
                       {/* Status */}
-                      {qStatus && (
+                      {perfs[`${p.id}-${q}`] && (
                         <div className="flex flex-col items-center gap-1">
                           {statusBadge(qStatus)}
                           

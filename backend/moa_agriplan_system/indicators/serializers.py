@@ -149,7 +149,7 @@ class IndicatorSerializer(serializers.ModelSerializer):
         model = Indicator
         fields = [
             'id', 'name', 'unit', 'description', 'department', 'department_id', 
-            'groups', 'group_ids', 'is_aggregatable', 'effective_unit', 'hierarchy_context',
+            'groups', 'group_ids', 'is_aggregatable', 'is_incremental', 'effective_unit', 'hierarchy_context',
             'applicable_quarters'
         ]
 

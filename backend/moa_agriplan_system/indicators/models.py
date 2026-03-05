@@ -119,6 +119,16 @@ class IndicatorGroup(models.Model):
         from .aggregation_utils import get_group_performance_aggregate
         return get_group_performance_aggregate(self, year, quarter)
 
+    def get_quarterly_target_aggregate(self, year, quarter_months=None):
+        """Calculate aggregate quarterly targets for specified months"""
+        from .aggregation_utils import get_group_quarterly_target_aggregate
+        return get_group_quarterly_target_aggregate(self, year, quarter_months)
+
+    def get_performance_for_period(self, year, quarter_months=None):
+        """Calculate aggregate performance for specified months"""
+        from .aggregation_utils import get_group_performance_for_period
+        return get_group_performance_for_period(self, year, quarter_months)
+
 
 class Indicator(models.Model):
     name = models.CharField(max_length=255)
@@ -129,6 +139,10 @@ class Indicator(models.Model):
     is_aggregatable = models.BooleanField(
         default=True,
         help_text="Whether this indicator's value should be included in parent group calculations"
+    )
+    is_incremental = models.BooleanField(
+        default=False,
+        help_text="Whether this indicator's performance should be calculated incrementally (cumulative)"
     )
     applicable_quarters = models.JSONField(
         default=list,

@@ -23,7 +23,7 @@ import {
 
 type Department = { id: number; name: string; sector?: { id: number; name: string } };
 type IndicatorGroup = { id: number; name: string; department: Department };
-type Indicator = { id: number; name: string; unit?: string; description?: string; department: Department; groups?: IndicatorGroup[]; is_aggregatable?: boolean };
+type Indicator = { id: number; name: string; unit?: string; description?: string; department: Department; groups?: IndicatorGroup[]; is_aggregatable?: boolean; is_incremental?: boolean };
 type Sector = { id: number; name: string };
 
 export default function Indicators() {
@@ -41,6 +41,7 @@ export default function Indicators() {
   const [groups, setGroups] = useState<IndicatorGroup[]>([]);
   const [groupIds, setGroupIds] = useState<number[]>([]);
   const [isAggregatable, setIsAggregatable] = useState(true);
+  const [isIncremental, setIsIncremental] = useState(false);
   const [loading, setLoading] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -153,6 +154,7 @@ export default function Indicators() {
     setDepartmentId('');
     setGroupIds([]);
     setIsAggregatable(true);
+    setIsIncremental(false);
     setFormError(null);
     setIsFormVisible(true);
   };
@@ -191,7 +193,8 @@ export default function Indicators() {
         description: description.trim() || undefined, 
         department_id: departmentId, 
         group_ids: groupIds,
-        ...(groupIds.length > 0 && { is_aggregatable: isAggregatable })
+        ...(groupIds.length > 0 && { is_aggregatable: isAggregatable }),
+        is_incremental: isIncremental
       };
       
       if (editing) {
@@ -228,6 +231,7 @@ export default function Indicators() {
     setDepartmentId(i.department.id);
     setGroupIds((i.groups || []).map((g) => g.id));
     setIsAggregatable(i.is_aggregatable ?? true);
+    setIsIncremental(i.is_incremental ?? false);
     setIsFormVisible(true);
     
     // Scroll to form
@@ -532,6 +536,7 @@ export default function Indicators() {
                 )}
               </div>
 
+              {/* Aggregatable Checkbox - only show when indicator has groups */}
               {groupIds.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -557,6 +562,30 @@ export default function Indicators() {
                 </div>
               )}
 
+              {/* Incremental Checkbox - always visible */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <ArrowUp className="inline w-4 h-4 mr-1" />
+                  Incremental
+                </label>
+                <div className="flex items-center h-10">
+                  <input
+                    type="checkbox"
+                    id="is-incremental"
+                    checked={isIncremental}
+                    onChange={(e) => setIsIncremental(e.target.checked)}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                    disabled={isSubmitting}
+                  />
+                  <label htmlFor="is-incremental" className="ml-2 text-sm text-gray-700">
+                    Calculate performance incrementally (cumulative)
+                  </label>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  When enabled, performance will be calculated cumulatively across quarters
+                </p>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
                 <textarea
@@ -564,459 +593,208 @@ export default function Indicators() {
                   onChange={(e) => setDescription(e.target.value)}
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
                   rows={3}
-                  placeholder="Enter a detailed description for this indicator..."
+                  placeholder="Optional description of what this indicator measures..."
                   disabled={isSubmitting}
                 />
               </div>
 
+              {/* Form Error */}
               {formError && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-red-600">{formError}</p>
-                  <button
-                    onClick={() => setFormError(null)}
-                    className="ml-auto text-red-500 hover:text-red-700"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-sm text-red-800">{formError}</p>
+                  </div>
                 </div>
               )}
 
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className={`inline-flex items-center gap-2 px-6 py-3 text-white rounded-xl transition-all duration-200 shadow-lg hover:shadow-xl ${
-                    isSubmitting
-                      ? 'bg-gray-400 cursor-not-allowed'
-                      : editing
-                      ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600'
-                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700'
-                  }`}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      {editing ? 'Updating...' : 'Creating...'}
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-5 h-5" />
-                      {editing ? 'Update Indicator' : 'Create Indicator'}
-                    </>
-                  )}
-                </button>
-                {editing && (
-                  <button
-                    type="button"
-                    onClick={handleAddNewIndicator}
-                    disabled={isSubmitting}
-                    className="inline-flex items-center gap-2 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors duration-200"
-                  >
-                    <Plus className="w-5 h-5" />
-                    Create New Instead
-                  </button>
-                )}
+              {/* Form Actions */}
+              <div className="flex items-center justify-end gap-4 pt-4 border-t border-gray-200">
                 <button
                   type="button"
                   onClick={() => setIsFormVisible(false)}
+                  className="px-6 py-2.5 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors duration-200"
                   disabled={isSubmitting}
-                  className="px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors duration-200"
                 >
                   Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isSubmitting}
+                >
+                  <Save className="w-4 h-4" />
+                  {isSubmitting ? 'Saving...' : (editing ? 'Update Indicator' : 'Create Indicator')}
                 </button>
               </div>
             </form>
           </div>
         )}
 
-        {/* Form Toggle Button (when form is hidden) */}
-        {isSuperuser && !isFormVisible && (
-          <div className="mb-8">
-            <button
-              onClick={handleAddNewIndicator}
-              className="w-full inline-flex items-center justify-center gap-2 px-6 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-dashed border-blue-200 text-blue-700 rounded-2xl hover:from-blue-100 hover:to-indigo-100 hover:border-blue-300 hover:shadow-lg transition-all duration-200 font-medium"
-            >
-              <Plus className="w-5 h-5" />
-              Click to Add New Indicator
-              <ArrowUp className="w-4 h-4 ml-auto" />
-            </button>
-          </div>
-        )}
-
-        {/* Results Summary */}
-        <div className="mb-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">
-                Indicators ({filteredIndicators.length})
-              </h3>
-              <p className="text-sm text-gray-600">
-                Showing {paged.length} of {filteredIndicators.length} indicators
-              </p>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="text-sm text-gray-600">
-                Page {page} of {totalPages}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* List Error */}
-        {listError && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-red-600">{listError}</p>
-            <button
-              onClick={() => setListError(null)}
-              className="ml-auto text-red-500 hover:text-red-700"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
-        {/* Indicators Table/Cards */}
+        {/* Indicators List */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-lg overflow-hidden">
-          {/* Desktop Table */}
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
-                <tr>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">ID</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Indicator</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Unit</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Department</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Sector</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Groups</th>
-                  <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Aggregatable</th>
-                  {isSuperuser && <th className="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Actions</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {loading ? (
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="text-lg font-semibold text-gray-900">All Indicators ({filteredIndicators.length})</h2>
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <span className="ml-3 text-gray-600">Loading indicators...</span>
+            </div>
+          ) : filteredIndicators.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="text-gray-400 mb-4">
+                <Hash className="w-12 h-12 mx-auto" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No indicators found</h3>
+              <p className="text-gray-600">
+                {hasActiveFilters ? 'Try adjusting your filters' : 'Get started by creating your first indicator'}
+              </p>
+              {!hasActiveFilters && isSuperuser && (
+                <button
+                  onClick={handleAddNewIndicator}
+                  className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
+                >
+                  <Plus className="w-4 h-4" />
+                  Create Indicator
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
-                    <td colSpan={isSuperuser ? 8 : 7} className="px-6 py-12 text-center">
-                      <div className="flex flex-col items-center gap-3">
-                        <div className="w-8 h-8 border-3 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
-                        <p className="text-gray-600">Loading indicators...</p>
-                      </div>
-                    </td>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Indicator</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unit</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Department</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Groups</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Properties</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                   </tr>
-                ) : paged.length === 0 ? (
-                  <tr>
-                    <td colSpan={isSuperuser ? 8 : 7} className="px-6 py-12 text-center">
-                      <div className="flex flex-col items-center gap-3">
-                        <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
-                          <Search className="w-6 h-6 text-gray-400" />
-                        </div>
-                        <p className="text-gray-600 font-medium">No indicators found</p>
-                        <p className="text-gray-500 text-sm">Try adjusting your search or filters</p>
-                        {isSuperuser && (
-                          <button
-                            onClick={handleAddNewIndicator}
-                            className="mt-3 inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors duration-200"
-                          >
-                            <Plus className="w-4 h-4" />
-                            Add New Indicator
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  paged.map((i) => (
-                    <tr 
-                      key={i.id} 
-                      className="hover:bg-blue-50/50 transition-colors duration-150 group"
-                    >
-                      <td className="px-6 py-4">
-                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                          #{i.id}
-                        </span>
-                      </td>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {paged.map((indicator) => (
+                    <tr key={indicator.id} className="hover:bg-gray-50 transition-colors duration-150">
                       <td className="px-6 py-4">
                         <div>
-                          <p className="font-medium text-gray-900">{i.name}</p>
-                          {i.description && (
-                            <p className="text-sm text-gray-600 mt-1 line-clamp-1">{i.description}</p>
+                          <div className="text-sm font-medium text-gray-900">{indicator.name}</div>
+                          {indicator.description && (
+                            <div className="text-xs text-gray-500 mt-1 line-clamp-2">{indicator.description}</div>
                           )}
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        {i.unit ? (
-                          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                            {i.unit}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                          {indicator.unit || 'N/A'}
+                        </span>
                       </td>
+                      <td className="px-6 py-4 text-sm text-gray-900">{indicator.department.name}</td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <Building className="w-4 h-4 text-gray-400" />
-                          <span className="text-gray-700">{i.department?.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        {i.department?.sector?.name ? (
-                          <span className="text-gray-700">{i.department.sector.name}</span>
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4">
-                        {(i.groups && i.groups.length > 0) ? (
-                          <div className="flex flex-wrap gap-1 max-w-xs">
-                            {i.groups.slice(0, 3).map((g) => (
+                        {(indicator.groups && indicator.groups.length > 0) ? (
+                          <div className="space-y-1">
+                            {indicator.groups.map((group) => (
                               <span
-                                key={g.id}
-                                className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800"
-                                title={g.name}
+                                key={group.id}
+                                className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-700 mr-1 mb-1"
                               >
-                                {g.name.length > 20 ? g.name.substring(0, 20) + '...' : g.name}
+                                {group.name}
                               </span>
                             ))}
-                            {i.groups.length > 3 && (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                                +{i.groups.length - 3} more
-                              </span>
-                            )}
                           </div>
                         ) : (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-gray-400 text-xs">No groups</span>
                         )}
                       </td>
                       <td className="px-6 py-4">
-                        {(i.groups && i.groups.length > 0) ? (
-                          i.is_aggregatable === false ? (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                              No
-                            </span>
+                        <div className="space-y-1">
+                          {(indicator.groups && indicator.groups.length > 0) ? (
+                            <>
+                              {indicator.is_aggregatable === false ? (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                  No
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                  Yes
+                                </span>
+                              )}
+                              <span className="text-xs text-gray-500 ml-1">Aggregatable</span>
+                            </>
                           ) : (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                              Yes
-                            </span>
-                          )
-                        ) : (
-                          <span className="text-gray-400">—</span>
-                        )}
+                            <span className="text-gray-400 text-xs">No groups</span>
+                          )}
+                          {indicator.is_incremental && (
+                            <>
+                              <div className="mt-1">
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                  Yes
+                                </span>
+                                <span className="text-xs text-gray-500 ml-1">Incremental</span>
+                              </div>
+                            </>
+                          )}
+                        </div>
                       </td>
-                      {isSuperuser && (
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                      <td className="px-6 py-4 text-right">
+                        {isSuperuser && (
+                          <div className="flex items-center justify-end gap-2">
                             <button
-                              onClick={() => onEdit(i)}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors duration-200"
+                              onClick={() => onEdit(indicator)}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors duration-200"
                               title="Edit indicator"
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => onDelete(i)}
-                              className="inline-flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors duration-200"
+                              onClick={() => onDelete(indicator)}
+                              className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors duration-200"
                               title="Delete indicator"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile Cards */}
-          <div className="md:hidden">
-            {loading ? (
-              <div className="p-8 text-center">
-                <div className="w-8 h-8 border-3 border-gray-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
-                <p className="text-gray-600">Loading indicators...</p>
-              </div>
-            ) : paged.length === 0 ? (
-              <div className="p-8 text-center">
-                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Search className="w-6 h-6 text-gray-400" />
-                </div>
-                <p className="text-gray-600 font-medium">No indicators found</p>
-                <p className="text-gray-500 text-sm mt-1">Try adjusting your search or filters</p>
-                {isSuperuser && (
-                  <button
-                    onClick={handleAddNewIndicator}
-                    className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors duration-200"
-                  >
-                    <Plus className="w-4 h-4" />
-                    Add New Indicator
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-200">
-                {paged.map((i) => (
-                  <div key={i.id} className="p-4 hover:bg-gray-50 transition-colors duration-150">
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 mb-2">
-                          #{i.id}
-                        </span>
-                        <h4 className="font-medium text-gray-900">{i.name}</h4>
-                        {i.description && (
-                          <p className="text-sm text-gray-600 mt-1 line-clamp-2">{i.description}</p>
                         )}
-                      </div>
-                      {i.unit && (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                          {i.unit}
-                        </span>
-                      )}
-                    </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
-                    <div className="space-y-2 text-sm">
-                      <div className="flex items-center gap-2">
-                        <Building className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                        <span className="text-gray-700">{i.department?.name}</span>
-                      </div>
-                      {i.department?.sector?.name && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-600">Sector:</span>
-                          <span className="text-gray-700">{i.department.sector.name}</span>
-                        </div>
-                      )}
-                      {i.groups && i.groups.length > 0 && (
-                        <div>
-                          <span className="text-gray-600 mr-2">Groups:</span>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {i.groups.map((g) => (
-                              <span
-                                key={g.id}
-                                className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-green-100 text-green-800"
-                              >
-                                {g.name}
-                              </span>
-                            ))}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-gray-600">Aggregatable:</span>
-                            {i.is_aggregatable === false ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-red-100 text-red-800">
-                                No
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-green-100 text-green-800">
-                                Yes
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {isSuperuser && (
-                      <div className="flex gap-2 mt-4 pt-3 border-t border-gray-200">
-                        <button
-                          onClick={() => onEdit(i)}
-                          className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors duration-200"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => onDelete(i)}
-                          className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 transition-colors duration-200"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                          Delete
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="px-6 py-4 border-t border-gray-200">
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-gray-700">
+                  Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, filteredIndicators.length)} of {filteredIndicators.length} results
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage(page - 1)}
+                    disabled={page === 1}
+                    className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="px-3 py-1 text-sm text-gray-700">
+                    Page {page} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setPage(page + 1)}
+                    disabled={page === totalPages}
+                    className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
-
-        {/* Pagination */}
-        {filteredIndicators.length > 0 && totalPages > 1 && (
-          <div className="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="text-sm text-gray-600">
-              Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, filteredIndicators.length)} of{' '}
-              {filteredIndicators.length} indicators
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border transition-all duration-200 ${
-                  page === 1
-                    ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
-                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400'
-                }`}
-              >
-                <ChevronLeft className="w-4 h-4" />
-                Previous
-              </button>
-              
-              <div className="flex items-center gap-1">
-                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  let pageNum;
-                  if (totalPages <= 5) {
-                    pageNum = i + 1;
-                  } else if (page <= 3) {
-                    pageNum = i + 1;
-                  } else if (page >= totalPages - 2) {
-                    pageNum = totalPages - 4 + i;
-                  } else {
-                    pageNum = page - 2 + i;
-                  }
-                  
-                  return (
-                    <button
-                      key={pageNum}
-                      onClick={() => setPage(pageNum)}
-                      className={`w-10 h-10 rounded-lg transition-all duration-200 ${
-                        page === pageNum
-                          ? 'bg-blue-600 text-white shadow-md'
-                          : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      {pageNum}
-                    </button>
-                  );
-                })}
-              </div>
-              
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg border transition-all duration-200 ${
-                  page === totalPages
-                    ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
-                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400'
-                }`}
-              >
-                Next
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
       </div>
-
-      {/* Add fade-in animation */}
-      <style>{`
-        @keyframes fade-in {
-          from { opacity: 0; transform: translateY(-10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in {
-          animation: fade-in 0.3s ease-out;
-        }
-      `}</style>
     </div>
   );
 }

@@ -372,10 +372,25 @@ class MinisterDashboardView(APIView):
         
         total_achieved = sum(float(p.value) for p in filtered_perfs if p.value is not None)
         
-        # Calculate proportional target for achievement percentage
+        # Calculate target based on quarterly breakdowns for the specified period
         target_for_percentage = total_annual_target
         if quarter_months:
-            target_for_percentage = (total_annual_target * quarter_months) / 12
+            # Get actual quarterly targets from breakdowns
+            quarterly_target_totals = {'Q1': 0, 'Q2': 0, 'Q3': 0, 'Q4': 0}
+            for bd in breakdowns_qs:
+                quarterly_target_totals['Q1'] += float(bd.q1 or 0)
+                quarterly_target_totals['Q2'] += float(bd.q2 or 0)
+                quarterly_target_totals['Q3'] += float(bd.q3 or 0)
+                quarterly_target_totals['Q4'] += float(bd.q4 or 0)
+            
+            # Sum targets for the specified months
+            if quarter_months == 3:
+                target_for_percentage = quarterly_target_totals['Q1']
+            elif quarter_months == 6:
+                target_for_percentage = quarterly_target_totals['Q1'] + quarterly_target_totals['Q2']
+            elif quarter_months == 9:
+                target_for_percentage = quarterly_target_totals['Q1'] + quarterly_target_totals['Q2'] + quarterly_target_totals['Q3']
+            # If quarter_months is 12 or None, use total annual target
         
         achievement_percentage = (total_achieved / target_for_percentage * 100) if target_for_percentage > 0 else 0
 
@@ -395,10 +410,23 @@ class MinisterDashboardView(APIView):
                     continue
             indicator_performance[plan_id]['achieved'] += float(perf.value) if perf.value is not None else 0
 
-        # Apply proportional targets for quarter filtering
+        # Apply quarterly targets for quarter filtering
         if quarter_months:
             for plan_id in indicator_performance:
-                indicator_performance[plan_id]['target'] = (indicator_performance[plan_id]['target'] * quarter_months) / 12
+                # Get quarterly breakdown for this plan
+                try:
+                    breakdown = breakdowns_qs.get(plan_id=plan_id)
+                    quarterly_target = 0
+                    if quarter_months == 3:
+                        quarterly_target = float(breakdown.q1 or 0)
+                    elif quarter_months == 6:
+                        quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0)
+                    elif quarter_months == 9:
+                        quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0) + float(breakdown.q3 or 0)
+                    indicator_performance[plan_id]['target'] = quarterly_target
+                except QuarterlyBreakdown.DoesNotExist:
+                    # Fallback to proportional if no breakdown exists
+                    indicator_performance[plan_id]['target'] = (indicator_performance[plan_id]['target'] * quarter_months) / 12
 
         on_track = 0
         lagging = 0
@@ -423,10 +451,27 @@ class MinisterDashboardView(APIView):
                 }
             sector_data[sector_id]['target'] += float(plan.target)
 
-        # Apply proportional targets for quarter filtering
+        # Apply quarterly targets for sector filtering
         if quarter_months:
             for sector_id in sector_data:
-                sector_data[sector_id]['target'] = (sector_data[sector_id]['target'] * quarter_months) / 12
+                # Get all plans for this sector
+                sector_plans = plans_qs.filter(indicator__department__sector_id=sector_id)
+                sector_quarterly_target = 0
+                
+                for plan in sector_plans:
+                    try:
+                        breakdown = breakdowns_qs.get(plan_id=plan.id)
+                        if quarter_months == 3:
+                            sector_quarterly_target += float(breakdown.q1 or 0)
+                        elif quarter_months == 6:
+                            sector_quarterly_target += float(breakdown.q1 or 0) + float(breakdown.q2 or 0)
+                        elif quarter_months == 9:
+                            sector_quarterly_target += float(breakdown.q1 or 0) + float(breakdown.q2 or 0) + float(breakdown.q3 or 0)
+                    except QuarterlyBreakdown.DoesNotExist:
+                        # Fallback to proportional if no breakdown exists
+                        sector_quarterly_target += (float(plan.target) * quarter_months) / 12
+                
+                sector_data[sector_id]['target'] = sector_quarterly_target
 
         for perf in filtered_perfs:
             try:
@@ -698,6 +743,14 @@ class IndicatorPerformanceView(APIView):
             status__in=[PerformanceStatus.APPROVED, PerformanceStatus.VALIDATED, PerformanceStatus.FINAL_APPROVED]
         )
 
+        # Get breakdowns for quarterly target calculations
+        breakdowns_qs = QuarterlyBreakdown.objects.select_related(
+            'plan__indicator__department__sector'
+        ).filter(
+            plan__year=year,
+            status__in=[PlanStatus.APPROVED, PlanStatus.VALIDATED, PlanStatus.FINAL_APPROVED]
+        )
+
         # Build sector structure
         sectors_dict = {}
         
@@ -733,12 +786,25 @@ class IndicatorPerformanceView(APIView):
             # Check if target is N/A (None, empty, or 'N/A')
             is_na_target = (plan.target is None or plan.target == '' or plan.target == 'N/A')
             
-            # Calculate proportional target based on quarter_months (only if not N/A)
+            # Calculate quarterly target based on breakdowns (only if not N/A)
             if not is_na_target:
                 try:
                     target = float(plan.target)
                     if quarter_months:
-                        target = (target * quarter_months) / 12
+                        # Get quarterly breakdown for this plan
+                        try:
+                            breakdown = breakdowns_qs.get(plan_id=plan_id)
+                            quarterly_target = 0
+                            if quarter_months == 3:
+                                quarterly_target = float(breakdown.q1 or 0)
+                            elif quarter_months == 6:
+                                quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0)
+                            elif quarter_months == 9:
+                                quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0) + float(breakdown.q3 or 0)
+                            target = quarterly_target
+                        except QuarterlyBreakdown.DoesNotExist:
+                            # Fallback to proportional if no breakdown exists
+                            target = (target * quarter_months) / 12
                 except (ValueError, TypeError):
                     is_na_target = True
                     target = 0
@@ -795,15 +861,25 @@ class IndicatorPerformanceView(APIView):
         # Calculate sector and group performance percentages
         sectors_list = []
         for sector_id, sector_data in sectors_dict.items():
-            # Calculate sector overall performance (average of all indicators)
-            indicator_percentages = [
-                ind['performance_percentage']
-                for ind in sector_data['indicators'].values()
-                if ind['performance_percentage'] is not None
-            ]
+            # Calculate sector performance via departments (average of department averages)
+            # Group indicators by department
+            dept_indicators = {}
+            for ind in sector_data['indicators'].values():
+                dept_name = ind.get('department_name', 'Unknown')
+                if dept_name not in dept_indicators:
+                    dept_indicators[dept_name] = []
+                if ind['performance_percentage'] is not None:
+                    dept_indicators[dept_name].append(ind['performance_percentage'])
             
-            if indicator_percentages:
-                sector_performance = sum(indicator_percentages) / len(indicator_percentages)
+            # Calculate each department's average percentage
+            dept_averages = []
+            for dept_name, pcts in dept_indicators.items():
+                if pcts:
+                    dept_averages.append(sum(pcts) / len(pcts))
+            
+            # Sector performance = average of department percentages
+            if dept_averages:
+                sector_performance = sum(dept_averages) / len(dept_averages)
             else:
                 sector_performance = None
             

@@ -193,6 +193,146 @@ def get_group_performance_aggregate(group, year: int, quarter: int) -> Optional[
     return total
 
 
+def get_group_quarterly_target_aggregate(group, year: int, quarter_months: int = None) -> Dict[str, Optional[Decimal]]:
+    """
+    Calculate aggregate quarterly targets for a group for specified months.
+    
+    Args:
+        group: IndicatorGroup instance
+        year: Year to aggregate for
+        quarter_months: Number of months (3, 6, 9, or None for all)
+        
+    Returns:
+        Dict with quarterly target values for specified period
+    """
+    from plans.models import AnnualPlan, QuarterlyBreakdown
+    
+    # Get all direct child indicators that are aggregatable
+    direct_indicators = group.indicators.filter(is_aggregatable=True)
+    
+    # Get all child groups for recursive aggregation
+    child_groups = group.children.all()
+    
+    # Start with empty result
+    result = {'q1': None, 'q2': None, 'q3': None, 'q4': None}
+    
+    # Process direct indicators
+    if direct_indicators.exists():
+        # Get all quarterly breakdowns for direct indicators in one query
+        breakdowns = QuarterlyBreakdown.objects.filter(
+            plan__indicator__in=direct_indicators,
+            plan__year=year
+        ).select_related('plan__indicator')
+        
+        # Group by quarter applicability and calculate sums
+        for quarter_num in range(1, 5):
+            quarter_field = f'q{quarter_num}'
+            
+            # Filter breakdowns by quarter applicability
+            applicable_breakdowns = [
+                bd for bd in breakdowns 
+                if bd.plan.indicator.is_quarter_applicable(quarter_num)
+            ]
+            
+            if applicable_breakdowns:
+                # Sum values, treating NULL as 0 for applicable quarters
+                quarter_sum = sum(
+                    getattr(bd, quarter_field) or Decimal('0') 
+                    for bd in applicable_breakdowns
+                )
+                result[quarter_field] = quarter_sum
+            else:
+                result[quarter_field] = None
+    
+    # Process child groups recursively
+    if child_groups.exists():
+        for child_group in child_groups:
+            child_result = get_group_quarterly_target_aggregate(child_group, year)
+            
+            for quarter_num in range(1, 5):
+                quarter_field = f'q{quarter_num}'
+                if child_result[quarter_field] is not None:
+                    if result[quarter_field] is None:
+                        result[quarter_field] = Decimal('0')
+                    result[quarter_field] += child_result[quarter_field]
+    
+    # If quarter_months is specified, calculate total for that period
+    if quarter_months:
+        total_target = Decimal('0')
+        if quarter_months >= 3 and result['q1'] is not None:
+            total_target += result['q1']
+        if quarter_months >= 6 and result['q2'] is not None:
+            total_target += result['q2']
+        if quarter_months >= 9 and result['q3'] is not None:
+            total_target += result['q3']
+        if quarter_months >= 12 and result['q4'] is not None:
+            total_target += result['q4']
+        
+        return {'period_target': total_target}
+    
+    return result
+
+
+def get_group_performance_for_period(group, year: int, quarter_months: int = None) -> Optional[Decimal]:
+    """
+    Calculate aggregate performance for a group for specified months.
+    
+    Args:
+        group: IndicatorGroup instance
+        year: Year to aggregate for
+        quarter_months: Number of months (3, 6, 9, or None for all)
+        
+    Returns:
+        Decimal sum or None if no applicable data
+    """
+    from plans.models import AnnualPlan, QuarterlyPerformance
+    
+    # Get all direct child indicators that are aggregatable
+    direct_indicators = group.indicators.filter(is_aggregatable=True)
+    
+    # Determine which quarters to include
+    quarters_to_include = [1, 2, 3, 4]
+    if quarter_months:
+        quarter_months_map = {1: 3, 2: 6, 3: 9, 4: 12}
+        quarters_to_include = [
+            q for q in [1, 2, 3, 4] 
+            if quarter_months_map[q] <= quarter_months
+        ]
+    
+    total = Decimal('0')
+    has_data = False
+    
+    # Get performance data for applicable indicators and quarters
+    for quarter in quarters_to_include:
+        # Filter indicators where this quarter is applicable
+        applicable_indicators = [
+            ind for ind in direct_indicators 
+            if ind.is_quarter_applicable(quarter)
+        ]
+        
+        if applicable_indicators:
+            quarter_total = QuarterlyPerformance.objects.filter(
+                plan__indicator__in=applicable_indicators,
+                plan__year=year,
+                quarter=quarter
+            ).aggregate(
+                total=Sum(Coalesce('value', Value(Decimal('0')), output_field=DecimalField()))
+            )['total'] or Decimal('0')
+            
+            total += quarter_total
+            has_data = True
+    
+    # Add child group aggregates
+    child_groups = group.children.all()
+    for child_group in child_groups:
+        child_result = get_group_performance_for_period(child_group, year, quarter_months)
+        if child_result is not None:
+            total += child_result
+            has_data = True
+    
+    return total if has_data else None
+
+
 def get_bulk_quarterly_aggregates(groups: List, year: int) -> Dict[int, Dict[str, Optional[Decimal]]]:
     """
     Get quarterly aggregates for multiple groups in bulk to avoid N+1 queries.
