@@ -173,6 +173,7 @@ CORS_ALLOWED_ORIGINS = [
     'http://10.10.20.233:8080',      # 👈 ADD THIS - LAN frontend on port 8080
     'http://196.188.248.104:8080', 
      'http://localhost:5173', # 👈 ADD THIS - Public frontend
+     'http://localhost:5174',
 ]
 
 # 👇 UPDATED: CSRF trusted origins
@@ -184,7 +185,8 @@ CSRF_TRUSTED_ORIGINS = [
     'http://10.10.20.233:8000',      # 👈 ADD THIS - LAN backend
     'http://196.188.248.104:8080',   # 👈 ADD THIS - Public frontend
     'http://196.188.248.104:8000', 
-     'http://localhost:5173'  # 👈 ADD THIS - Public backend
+     'http://localhost:5173',  # 👈 ADD THIS - Public backend
+     'http://localhost:5174',
 ]
 
 # Quarterly breakdown submission window (configurable via .env)

@@ -1,1619 +1,1960 @@
-import { useEffect, useMemo, useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, ComposedChart } from 'recharts';
+import React, { useEffect, useState } from 'react';
+
+import {
+
+  ComposedChart,
+
+  Bar,
+
+  Line,
+
+  XAxis,
+
+  YAxis,
+
+  CartesianGrid,
+
+  Tooltip,
+
+  Legend,
+
+  ResponsiveContainer,
+
+} from 'recharts';
+
+import { X, ChevronRight, Activity, TrendingUp, Target, Info, Search, Calendar } from 'lucide-react';
+
 import api from '../lib/api';
+
 import YearFilter from '../components/YearFilter';
+
 import QuarterFilter from '../components/QuarterFilter';
-import { getCurrentEthiopianDate, toGregorianYearFromEthiopian, toEthiopianYearFromGregorian } from '../lib/ethiopian';
 
-type AnnualPlan = {
+import { getCurrentEthiopianDate, toEthiopianYearFromGregorian, toGregorianYearFromEthiopian } from '../lib/ethiopian';
+
+import homePic from '../assets/home_pic.jpg';
+
+import moaLogo from '../assets/moa planinig logo.png';
+
+
+
+// --- Types ---
+
+type Indicator = {
+
   id: number;
-  year: number;
-  indicator: number;
-  indicator_name: string;
-  indicator_unit?: string;
-  department_id?: number;
-  department_name?: string;
-  sector_id?: number;
-  sector_name?: string;
-  target: string;
+
+  plan_id: number;
+
+  name: string;
+
+  unit: string;
+
+  description: string;
+
+  is_aggregatable: boolean;
+
+  kpi_characteristics: string;
+
+  target: number;
+
+  achieved: number;
+
+  performance_percentage: number | null;
+
+  group_id: number | null;
+
+  group_name: string | null;
+
 };
 
-type Breakdown = {
-  id: number;
-  plan: number;
-  q1: string | null;
-  q2: string | null;
-  q3: string | null;
-  q4: string | null;
-};
 
-type Performance = {
-  id: number;
-  plan: number;
-  quarter: number;
-  value: string;
-};
-
-type DashboardData = {
-  kpis: {
-    total_annual_target: number;
-    total_achieved_performance: number;
-    achievement_percentage: number;
-    indicators_on_track: number;
-    indicators_lagging: number;
-  };
-  sector_comparison: Array<{
-    sector_id: number;
-    sector_name: string;
-    target: number;
-    achieved: number;
-  }>;
-  quarterly_trend: Array<{
-    quarter: string;
-    planned: number;
-    actual: number;
-  }>;
-  approval_status: {
-    approved: number;
-    pending: number;
-    rejected: number;
-  };
-  approval_stages: {
-    draft: number;
-    submitted: number;
-    approved: number;
-    validated: number;
-    final_approved: number;
-    rejected: number;
-  };
-  sector_summaries: Array<{
-    sector_id: number;
-    sector_name: string;
-    annual_target: number;
-    performance_achieved: number;
-    progress_rate: number;
-  }>;
-  indicators_at_risk: Array<{
-    indicator_name: string;
-    sector_name: string;
-    department_name: string;
-    target: number;
-    achieved: number;
-    gap: number;
-    progress_pct: number;
-    risk_level: string;
-  }>;
-  late_or_rejected: Array<{
-    type: string;
-    indicator_name: string;
-    sector_name: string;
-    department_name: string;
-    quarter?: number;
-    status: string;
-    submitted_at?: string;
-    reviewed_at?: string;
-    days_late?: number;
-    comment: string;
-  }>;
-};
-
-const COLORS = {
-  primary: '#10b981',
-  secondary: '#3b82f6',
-  warning: '#f59e0b',
-  danger: '#ef4444',
-  info: '#06b6d4',
-};
-
-const PIE_COLORS = ['#10b981', '#f59e0b', '#ef4444'];
-
-// Performance category colors
-const PERFORMANCE_COLORS = {
-  achieved: '#065f46', // deep green
-  onTrack: '#10b981', // light green
-  inProgress: '#eab308', // yellow
-  weakPerformance: '#f97316', // orange
-  requiresIntervention: '#dc2626', // red
-  noData: '#9ca3af', // gray
-};
 
 type IndicatorGroup = {
+
   id: number;
+
   name: string;
+
   performance_percentage: number | null;
-  indicators: Array<{
-    id: number;
-    plan_id: number;
-    name: string;
-    unit: string;
-    description: string;
-    department_name: string;
-    target: number;
-    achieved: number;
-    performance_percentage: number | null;
-    group_id: number | null;
-    group_name: string | null;
-  }>;
+
+  indicators: Indicator[];
+
 };
+
+
+
+type Department = {
+
+  id: number;
+
+  name: string;
+
+  performance_percentage: number | null;
+
+  groups: IndicatorGroup[];
+
+  ungrouped_indicators: Indicator[];
+
+};
+
+
 
 type Sector = {
+
   id: number;
+
   name: string;
+
   performance_percentage: number | null;
-  indicator_groups: IndicatorGroup[];
-  ungrouped_indicators: Array<{
-    id: number;
-    plan_id: number;
-    name: string;
-    unit: string;
-    description: string;
-    department_name: string;
-    target: number;
-    achieved: number;
-    performance_percentage: number | null;
-    group_id: number | null;
-    group_name: string | null;
-  }>;
+
+  departments: Department[];
+
 };
 
-type IndicatorPerformanceData = {
+
+
+type DashboardData = {
+
   year: number;
+
+  quarter_months: number | null;
+
+  ministry_performance: number | null;
+
   sectors: Sector[];
+
 };
 
-type IndicatorDetail = {
+
+
+type IndicatorDetailData = {
+
   indicator: {
+
     id: number;
+
     name: string;
+
     unit: string;
+
     description: string;
+
     department_name: string;
+
+    kpi_characteristics: string;
+
   };
+
   yearly_data: Array<{
+
     year: number;
+
     target: number;
+
     achieved: number;
+
+    percentage: number | null;
+
   }>;
-  quarterly_data: Array<{
-    quarter: string;
+
+  current_year_quarters: Array<{
+
+    quarter: number;
+
     target: number;
-    achieved: number;
+
+    achieved: number | null;
+
+    percentage: number | null;
+
   }>;
+
+  last_year_quarters: Array<{
+
+    quarter: number;
+
+    target: number;
+
+    achieved: number | null;
+
+    percentage: number | null;
+
+  }>;
+
 };
+
+
+
+// --- Colors (matching legend: Achieved / On track / In progress / Weak / Requires intervention / No Data) ---
+
+const PERFORMANCE_RANGES = [
+
+  { label: 'Achieved',               range: '95% – 100%', color: '#047857', min: 95,  max: Infinity },
+
+  { label: 'On track',               range: '85% – 94%',  color: '#22c55e', min: 85,  max: 94.999 },
+
+  { label: 'In progress',            range: '65% – 84%',  color: '#eab308', min: 65,  max: 84.999 },
+
+  { label: 'Weak performance',       range: '50% – 64%',  color: '#f97316', min: 50,  max: 64.999 },
+
+  { label: 'Requires intervention',  range: '0% – 49%',   color: '#ef4444', min: 0,   max: 49.999 },
+
+  { label: 'No Data',                range: 'N/A',        color: '#9ca3af', min: -1,  max: -1 },
+
+];
+
+
+
+const matchesRange = (percentage: number | null, rangeLabel: string | null): boolean => {
+
+  if (!rangeLabel) return true; // no filter active
+
+  const range = PERFORMANCE_RANGES.find(r => r.label === rangeLabel);
+
+  if (!range) return true;
+
+  if (range.label === 'No Data') return percentage === null || isNaN(percentage as number);
+
+  if (percentage === null || isNaN(percentage)) return false;
+
+  return percentage >= range.min && percentage <= range.max;
+
+};
+
+
+
+const getPerformanceColor = (percentage: number | null) => {
+
+  if (percentage === null || isNaN(percentage)) return '#9ca3af';
+
+  if (percentage >= 95) return '#047857'; // Achieved – dark green
+
+  if (percentage >= 85) return '#22c55e'; // On track – green
+
+  if (percentage >= 65) return '#eab308'; // In progress – yellow
+
+  if (percentage >= 50) return '#f97316'; // Weak performance – orange
+
+  return '#ef4444'; // Requires intervention – red
+
+};
+
+
+
+const formatValue = (val: number | null | undefined) => {
+
+  if (val === null || val === undefined || isNaN(val)) return 'N/A';
+
+  return val.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+};
+
+
+
+const formatPct = (val: number | null | undefined) => {
+
+  if (val === null || val === undefined || isNaN(val)) return 'N/A';
+
+  return `${val.toFixed(1)}%`;
+
+};
+
+
+
+const HERO_MARQUEE_STYLES = `
+@keyframes heroSweep {
+  0% { transform: translateX(-140%); opacity: 0; }
+  10% { opacity: 1; }
+  35% { transform: translateX(0%); opacity: 1; }
+  55% { transform: translateX(0%); opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateX(140%); opacity: 0; }
+}
+.hero-marquee-text {
+  animation: heroSweep 18s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+`;
+
+
+
+// --- Components ---
 
 export default function MinisterView() {
+
   const ethDate = getCurrentEthiopianDate();
+
   const currentYear = Array.isArray(ethDate) && typeof ethDate[0] === 'number' ? ethDate[0] : new Date().getFullYear() - 7;
-  const [year, setYear] = useState<number>(currentYear);
-  const [quarterMonths, setQuarterMonths] = useState<number | null>(null);
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [plans, setPlans] = useState<AnnualPlan[]>([]);
-  const [breakdowns, setBreakdowns] = useState<Breakdown[]>([]);
-  const [perfs, setPerfs] = useState<Performance[]>([]);
+
   
-  // Indicator Performance View State
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'indicators'>('indicators');
-  const [indicatorData, setIndicatorData] = useState<IndicatorPerformanceData | null>(null);
+
+  const [year, setYear] = useState<number>(currentYear);
+
+  const [quarterMonths, setQuarterMonths] = useState<number | null>(null);
+
+  
+
+  const [data, setData] = useState<DashboardData | null>(null);
+
+  const [loading, setLoading] = useState(false);
+
+  const [error, setError] = useState<string | null>(null);
+
+
+
+  // Selection states
+
   const [selectedSectorId, setSelectedSectorId] = useState<number | null>(null);
-  const [selectedIndicatorId, setSelectedIndicatorId] = useState<number | null>(null);
-  const [indicatorDetail, setIndicatorDetail] = useState<IndicatorDetail | null>(null);
-  const [viewMode, setViewMode] = useState<'yearly' | 'quarterly'>('yearly');
-  const [loadingIndicatorData, setLoadingIndicatorData] = useState(false);
-  const [loadingIndicatorDetail, setLoadingIndicatorDetail] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState<string | null>(null);
 
-  const toNumber = (val: unknown) => {
-    const num = Number(val);
-    return Number.isFinite(num) ? num : 0;
-  };
+  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
 
-  // Get performance category and color
-  const getPerformanceCategory = (percentage: number | null): { label: string; color: string } => {
-    if (percentage === null || isNaN(percentage)) {
-      return { label: 'No Data', color: PERFORMANCE_COLORS.noData };
-    }
-    if (percentage >= 95) {
-      return { label: 'Achieved', color: PERFORMANCE_COLORS.achieved };
-    } else if (percentage >= 85) {
-      return { label: 'On Track', color: PERFORMANCE_COLORS.onTrack };
-    } else if (percentage >= 65) {
-      return { label: 'In Progress', color: PERFORMANCE_COLORS.inProgress };
-    } else if (percentage >= 50) {
-      return { label: 'Weak Performance', color: PERFORMANCE_COLORS.weakPerformance };
-    } else {
-      return { label: 'Requires Intervention', color: PERFORMANCE_COLORS.requiresIntervention };
-    }
-  };
 
-  const loadDashboard = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      // Convert Ethiopian year to Gregorian for backend API
-      const gregorianYear = toGregorianYearFromEthiopian(year);
-      const [dashRes, plansRes, bRes, pRes] = await Promise.all([
-        api.get('/api/minister-dashboard/', {
-          params: { year: gregorianYear, quarter_months: quarterMonths },
-        }),
-        api.get('/api/annual-plans/', { params: { year: gregorianYear } }),
-        api.get('/api/breakdowns/'),
-        api.get('/api/performances/'),
-      ]);
-      setData(dashRes.data);
-      setPlans((plansRes.data || []) as AnnualPlan[]);
-      setBreakdowns((bRes.data || []) as Breakdown[]);
-      setPerfs((pRes.data || []) as Performance[]);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Failed to load dashboard data');
-    } finally {
-      setLoading(false);
-    }
-  };
+
+  // Department & Indicator filters
+
+  const [filterDeptId, setFilterDeptId] = useState<number | null>(null);
+
+  const [indicatorSearch, setIndicatorSearch] = useState('');
+
+  const [selectedRangeLabel, setSelectedRangeLabel] = useState<string | null>(null);
+
+  
+
+  // Modal state
+
+  const [modalIndicatorId, setModalIndicatorId] = useState<number | null>(null);
+
+  const [modalData, setModalData] = useState<IndicatorDetailData | null>(null);
+
+  const [modalLoading, setModalLoading] = useState(false);
+
+  const [modalView, setModalView] = useState<'yearly' | 'quarterly'>('yearly');
+
+  const [heroScale, setHeroScale] = useState(1.18);
+
+  const [heroTransition, setHeroTransition] = useState('transform 400ms ease-out');
+
+  const marqueeStyleTag = React.useMemo(() => ({ __html: HERO_MARQUEE_STYLES }), []);
+
+
+
+  // Load Main Data
 
   useEffect(() => {
-    loadDashboard();
+
+    const loadData = async () => {
+
+      setLoading(true);
+
+      setError(null);
+
+      try {
+
+        const gYear = toGregorianYearFromEthiopian(year);
+
+        const res = await api.get('/api/indicator-performance/', {
+
+          params: { year: gYear, quarter_months: quarterMonths }
+
+        });
+
+        setData(res.data);
+
+        // Reset selections when filters change
+
+        setSelectedSectorId(null);
+
+        setSelectedDeptId(null);
+
+        setFilterDeptId(null);
+
+        setIndicatorSearch('');
+
+        setSelectedRangeLabel(null);
+
+      } catch (err: any) {
+
+        setError(err?.response?.data?.detail || 'Failed to load dashboard data');
+
+      } finally {
+
+        setLoading(false);
+
+      }
+
+    };
+
+    loadData();
+
   }, [year, quarterMonths]);
 
-  // Load indicator performance data
-  const loadIndicatorPerformance = async () => {
-    setLoadingIndicatorData(true);
-    setError(null);
-    try {
-      const gregorianYear = toGregorianYearFromEthiopian(year);
-      const res = await api.get('/api/indicator-performance/', {
-        params: { year: gregorianYear, quarter_months: quarterMonths },
-      });
-      setIndicatorData(res.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Failed to load indicator performance data');
-    } finally {
-      setLoadingIndicatorData(false);
-    }
-  };
 
-  // Load indicator detail
-  const loadIndicatorDetail = async (indicatorId: number) => {
-    setLoadingIndicatorDetail(true);
-    try {
-      const gregorianYear = toGregorianYearFromEthiopian(year);
-      const res = await api.get('/api/indicator-detail/', {
-        params: { indicator_id: indicatorId, year: gregorianYear, quarter_months: quarterMonths },
-      });
-      setIndicatorDetail(res.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Failed to load indicator detail');
-    } finally {
-      setLoadingIndicatorDetail(false);
-    }
-  };
 
   useEffect(() => {
-    if (activeTab === 'indicators') {
-      loadIndicatorPerformance();
-    }
-  }, [year, quarterMonths, activeTab]);
 
-  useEffect(() => {
-    if (selectedIndicatorId) {
-      loadIndicatorDetail(selectedIndicatorId);
-    }
-  }, [selectedIndicatorId, year, quarterMonths]);
+    const timers: ReturnType<typeof setTimeout>[] = [];
 
-  // Prepare pie chart data
-  const approvalPieData = useMemo(() => {
-    if (!data) return [];
-    return [
-      { name: 'Approved', value: data.approval_status.approved },
-      { name: 'Pending', value: data.approval_status.pending },
-      { name: 'Rejected', value: data.approval_status.rejected },
-    ].filter(item => item.value > 0);
-  }, [data]);
+    setHeroTransition('transform 350ms ease-out');
 
-  const sectorPerformanceData = useMemo(() => {
-    const sectorMap: Record<number, { name: string; percentages: number[] }> = {};
+    setHeroScale(1.2);
 
-    for (const p of plans) {
-      if (!p.sector_id || !p.sector_name) continue;
-      
-      // Filter performances based on quarter selection
-      const filteredPerfs = perfs.filter((pr) => {
-        if (pr.plan !== p.id) return false;
-        if (!quarterMonths) return true; // Full year - include all quarters
-        
-        // For quarter filtering, only include quarters up to the selected month
-        const quarterEndMonth = quarterMonths;
-        const quarterMonthsMap: Record<number, number> = { 1: 3, 2: 6, 3: 9, 4: 12 };
-        return quarterMonthsMap[pr.quarter] <= quarterEndMonth;
-      });
-      
-      const totalActual = filteredPerfs.reduce((sum, pr) => sum + toNumber(pr.value), 0);
-      
-      // For target, we need to calculate the proportional target based on quarter selection
-      let target = toNumber(p.target);
-      if (quarterMonths) {
-        // Calculate proportional target (e.g., 3 months = 25% of annual target, 6 months = 50%, etc.)
-        target = (target * quarterMonths) / 12;
-      }
-      
-      // Only calculate percentage if we have valid data (target > 0 and actual >= 0)
-      if (target <= 0) continue;
-      const pct = (totalActual / target) * 100;
-      
-      // Exclude N/A values (0% with no actual data) from averages
-      // Only include if there's actual performance data or meaningful achievement
-      if (totalActual > 0 || pct > 0) {
-        if (!sectorMap[p.sector_id]) {
-          sectorMap[p.sector_id] = { name: p.sector_name, percentages: [] };
-        }
-        sectorMap[p.sector_id].percentages.push(pct);
-      }
-    }
+    const frame = requestAnimationFrame(() => {
 
-    return Object.values(sectorMap)
-      .map((s) => {
-        // Calculate average excluding any remaining invalid values
-        const validPercentages = s.percentages.filter(p => !isNaN(p) && p >= 0);
-        return {
-          sector: s.name,
-          performance: validPercentages.length
-            ? validPercentages.reduce((a, b) => a + b, 0) / validPercentages.length
-            : 0,
-        };
-      })
-      .sort((a, b) => b.performance - a.performance);
-  }, [plans, perfs, quarterMonths]);
+      setHeroTransition('transform 8500ms ease-out');
 
-  const { sectorQuarterTrend, sectorList, generalQuarterTrend } = useMemo(() => {
-    const sectorMap: Record<
-      number,
-      { name: string; quarters: [number[], number[], number[], number[]] }
-    > = {};
+      setHeroScale(1);
 
-    for (const p of plans) {
-      if (!p.sector_id || !p.sector_name) continue;
-      if (!sectorMap[p.sector_id]) {
-        sectorMap[p.sector_id] = {
-          name: p.sector_name,
-          quarters: [[], [], [], []],
-        };
-      }
+      timers.push(setTimeout(() => {
 
-      const breakdown = breakdowns.find((b) => b.plan === p.id);
+        setHeroTransition('transform 6500ms ease-in-out');
 
-      for (let q = 1; q <= 4; q++) {
-        // Skip quarters beyond the selected quarter period
-        if (quarterMonths) {
-          const quarterMonthsMap: Record<number, number> = { 1: 3, 2: 6, 3: 9, 4: 12 };
-          if (quarterMonthsMap[q] > quarterMonths) continue;
-        }
-        
-        const target = toNumber(breakdown?.[`q${q}` as keyof Breakdown]);
-        if (target <= 0) continue;
-        const actual = perfs
-          .filter((pr) => pr.plan === p.id && pr.quarter === q)
-          .reduce((sum, pr) => sum + toNumber(pr.value), 0);
-        
-        // Only calculate percentage if we have valid data
-        const pct = (actual / target) * 100;
-        
-        // Exclude N/A values (0% with no actual data) from averages
-        if (actual > 0 || pct > 0) {
-          sectorMap[p.sector_id].quarters[q - 1].push(pct);
-        }
-      }
-    }
+        setHeroScale(1.08);
 
-    const sectorNames = Object.values(sectorMap).map((s) => s.name);
-    if (sectorNames.length === 0) {
-      return {
-        sectorQuarterTrend: [],
-        sectorList: [],
-        generalQuarterTrend: [],
-      };
-    }
+      }, 8500));
 
-    // Determine how many quarters to show based on selection
-    const numQuarters = quarterMonths ? Math.floor(quarterMonths / 3) : 4;
-    
-    const trendData = Array.from({ length: numQuarters }, (_, idx) => {
-      const entry: Record<string, string | number> = { quarter: `Q${idx + 1}` };
-      const sectorQuarterValues: number[] = [];
+      timers.push(setTimeout(() => {
 
-      for (const sector of Object.values(sectorMap)) {
-        const vals = sector.quarters[idx];
-        // Calculate average excluding N/A values (0% with no actual data)
-        const validVals = vals.filter(v => !isNaN(v) && v >= 0);
-        const avg = validVals.length ? validVals.reduce((a, b) => a + b, 0) / validVals.length : 0;
-        entry[sector.name] = avg;
-        if (validVals.length) sectorQuarterValues.push(avg);
-      }
+        setHeroTransition('transform 9000ms ease-in-out');
 
-      const generalAvg =
-        sectorQuarterValues.length > 0
-          ? sectorQuarterValues.reduce((a, b) => a + b, 0) / sectorQuarterValues.length
-          : 0;
-      entry.general = generalAvg;
+        setHeroScale(1);
 
-      return entry;
+      }, 15000));
+
     });
 
-    const generalTrend = trendData.map(({ quarter, general }) => ({
-      quarter,
-      general,
-    }));
+    return () => {
 
-    return {
-      sectorQuarterTrend: trendData,
-      sectorList: sectorNames,
-      generalQuarterTrend: generalTrend,
+      cancelAnimationFrame(frame);
+
+      timers.forEach(clearTimeout);
+
     };
-  }, [plans, breakdowns, perfs, quarterMonths]);
 
-  if (loading && !data) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading dashboard...</p>
-        </div>
-      </div>
-    );
-  }
+  }, [year, quarterMonths]);
 
-  if (error && !data) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-red-600 mb-4">{error}</div>
-          <button
-            onClick={loadDashboard}
-            className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
 
-  // Render Indicator Performance View
-  const renderIndicatorPerformanceView = () => {
-    if (loadingIndicatorData && !indicatorData) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading indicator performance...</p>
-          </div>
-        </div>
-      );
+
+  // Load Modal Data
+
+  useEffect(() => {
+
+    if (!modalIndicatorId) return;
+
+    const loadModal = async () => {
+
+      setModalLoading(true);
+
+      try {
+
+        const gYear = toGregorianYearFromEthiopian(year);
+
+        const res = await api.get('/api/indicator-detail/', {
+
+          params: { indicator_id: modalIndicatorId, year: gYear, quarter_months: quarterMonths }
+
+        });
+
+        setModalData(res.data);
+
+        setModalView(quarterMonths ? 'quarterly' : 'yearly');
+
+      } catch (err) {
+
+        console.error(err);
+
+      } finally {
+
+        setModalLoading(false);
+
+      }
+
+    };
+
+    loadModal();
+
+  }, [modalIndicatorId, year, quarterMonths]);
+
+
+
+  // Derived: flat list of all departments (for filter dropdown)
+
+  const allDepartments = React.useMemo(() => {
+
+    if (!data) return [];
+
+    const depts: { id: number; name: string; sectorId: number; sectorName: string }[] = [];
+
+    for (const sector of data.sectors) {
+
+      for (const dept of sector.departments) {
+
+        depts.push({ id: dept.id, name: dept.name, sectorId: sector.id, sectorName: sector.name });
+
+      }
+
     }
 
-    if (!indicatorData || !indicatorData.sectors || indicatorData.sectors.length === 0) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <div className="text-center text-gray-500">No indicator performance data available</div>
-        </div>
-      );
-    }
+    return depts.sort((a, b) => a.name.localeCompare(b.name));
 
-    // Calculate filter counts from all indicators across all sectors
-    const getAllIndicators = () => {
-      const allIndicators: Array<{
-        id: number;
-        plan_id: number;
-        name: string;
-        unit: string;
-        description: string;
-        department_name: string;
-        target: number;
-        achieved: number;
-        performance_percentage: number | null;
-        group_id: number | null;
-        group_name: string | null;
-        sector_id: number;
-        sector_name: string;
-      }> = [];
-      
-      indicatorData.sectors.forEach(sector => {
-        sector.indicator_groups.forEach(group => {
-          group.indicators.forEach(ind => {
-            allIndicators.push({
-              ...ind,
-              sector_id: sector.id,
-              sector_name: sector.name,
-            });
-          });
-        });
-        sector.ungrouped_indicators.forEach(ind => {
-          allIndicators.push({
-            ...ind,
-            sector_id: sector.id,
-            sector_name: sector.name,
-          });
-        });
-      });
-      
-      return allIndicators;
-    };
+  }, [data]);
 
-    const allIndicators = getAllIndicators();
-    
-    // Calculate counts for each category
-    const filterCounts = {
-      achieved: allIndicators.filter(ind => {
-        const pct = ind.performance_percentage;
-        return pct !== null && !isNaN(pct) && pct >= 95;
-      }).length,
-      onTrack: allIndicators.filter(ind => {
-        const pct = ind.performance_percentage;
-        return pct !== null && !isNaN(pct) && pct >= 85 && pct < 95;
-      }).length,
-      inProgress: allIndicators.filter(ind => {
-        const pct = ind.performance_percentage;
-        return pct !== null && !isNaN(pct) && pct >= 65 && pct < 85;
-      }).length,
-      weakPerformance: allIndicators.filter(ind => {
-        const pct = ind.performance_percentage;
-        return pct !== null && !isNaN(pct) && pct >= 50 && pct < 65;
-      }).length,
-      requiresIntervention: allIndicators.filter(ind => {
-        const pct = ind.performance_percentage;
-        return pct !== null && !isNaN(pct) && pct < 50;
-      }).length,
-      noData: allIndicators.filter(ind => {
-        const pct = ind.performance_percentage;
-        return pct === null || isNaN(pct);
-      }).length,
-    };
 
-    // Filter indicators based on selected filter
-    const getFilteredIndicators = () => {
-      if (!selectedFilter) return allIndicators;
-      
-      return allIndicators.filter(ind => {
-        const pct = ind.performance_percentage;
-        switch (selectedFilter) {
-          case 'achieved':
-            return pct !== null && !isNaN(pct) && pct >= 95;
-          case 'onTrack':
-            return pct !== null && !isNaN(pct) && pct >= 85 && pct < 95;
-          case 'inProgress':
-            return pct !== null && !isNaN(pct) && pct >= 65 && pct < 85;
-          case 'weakPerformance':
-            return pct !== null && !isNaN(pct) && pct >= 50 && pct < 65;
-          case 'requiresIntervention':
-            return pct !== null && !isNaN(pct) && pct < 50;
-          case 'noData':
-            return pct === null || isNaN(pct);
-          default:
-            return true;
-        }
-      });
-    };
 
-    const filteredIndicators = getFilteredIndicators();
-    
-    // Group filtered indicators by sector
-    const getFilteredIndicatorsBySector = () => {
-      const sectorMap: Record<number, {
-        sector: Sector;
-        indicators: typeof filteredIndicators;
-      }> = {};
-      
-      filteredIndicators.forEach(ind => {
-        if (!sectorMap[ind.sector_id]) {
-          const sector = indicatorData.sectors.find(s => s.id === ind.sector_id);
-          if (sector) {
-            sectorMap[ind.sector_id] = {
-              sector,
-              indicators: [],
-            };
+  // Derived: flat list of ALL indicators with department info (for range filter view)
+
+  const allIndicators = React.useMemo(() => {
+
+    if (!data) return [];
+
+    const list: (Indicator & { departmentName: string; sectorName: string })[] = [];
+
+    for (const sector of data.sectors) {
+
+      for (const dept of sector.departments) {
+
+        for (const group of dept.groups) {
+
+          for (const ind of group.indicators) {
+
+            list.push({ ...ind, departmentName: dept.name, sectorName: sector.name });
+
           }
+
         }
-        if (sectorMap[ind.sector_id]) {
-          sectorMap[ind.sector_id].indicators.push(ind);
+
+        for (const ind of dept.ungrouped_indicators) {
+
+          list.push({ ...ind, departmentName: dept.name, sectorName: sector.name });
+
         }
-      });
-      
-      return Object.values(sectorMap);
-    };
 
-    const filteredBySector = selectedFilter ? getFilteredIndicatorsBySector() : null;
+      }
 
-    const selectedSector = indicatorData.sectors.find(s => s.id === selectedSectorId);
-    const selectedIndicator = selectedSector
-      ? [...selectedSector.indicator_groups.flatMap(g => g.indicators), ...selectedSector.ungrouped_indicators]
-          .find(ind => ind.id === selectedIndicatorId)
-      : null;
+    }
 
-    return (
-      <div className="min-h-screen bg-gray-50 py-8 px-4">
-        <div className="max-w-7xl mx-auto">
-          {/* Header */}
-          <div className="mb-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-              <h1 className="text-3xl font-bold text-gray-900">Indicator Performance Dashboard</h1>
-              <div className="flex flex-col md:flex-row gap-4">
-                <div className="w-48">
-                  <YearFilter
-                    value={year}
-                    onChange={setYear}
-                    variant="dropdown"
-                    showLabel={false}
-                  />
-                </div>
-                <div className="w-48">
-                  <QuarterFilter
-                    value={quarterMonths}
-                    onChange={setQuarterMonths}
-                    variant="dropdown"
-                    showLabel={false}
-                  />
-                </div>
-              </div>
-            </div>
-            <p className="text-gray-600">
-              View indicator performance organized by sectors and indicator groups (Ethiopian Calendar)
-            </p>
-          </div>
+    return list;
 
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-              {error}
-            </div>
-          )}
+  }, [data]);
 
-          {/* Filter Cards */}
-          <div className="mb-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            <button
-              onClick={() => {
-                setSelectedFilter(selectedFilter === 'achieved' ? null : 'achieved');
-                setSelectedSectorId(null);
-                setSelectedIndicatorId(null);
-              }}
-              className={`p-4 rounded-lg border-2 transition-all hover:shadow-lg ${
-                selectedFilter === 'achieved'
-                  ? 'border-emerald-700 bg-emerald-50'
-                  : 'border-gray-200 bg-white hover:border-emerald-500'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div
-                  className="w-4 h-4 rounded"
-                  style={{ backgroundColor: PERFORMANCE_COLORS.achieved }}
-                ></div>
-                <span className="text-2xl font-bold text-gray-900">{filterCounts.achieved}</span>
-              </div>
-              <div className="text-left">
-                <div className="text-sm font-semibold text-gray-900">Achieved</div>
-                <div className="text-xs text-gray-500">95-100%</div>
-              </div>
-            </button>
 
-            <button
-              onClick={() => {
-                setSelectedFilter(selectedFilter === 'onTrack' ? null : 'onTrack');
-                setSelectedSectorId(null);
-                setSelectedIndicatorId(null);
-              }}
-              className={`p-4 rounded-lg border-2 transition-all hover:shadow-lg ${
-                selectedFilter === 'onTrack'
-                  ? 'border-emerald-600 bg-emerald-50'
-                  : 'border-gray-200 bg-white hover:border-emerald-500'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div
-                  className="w-4 h-4 rounded"
-                  style={{ backgroundColor: PERFORMANCE_COLORS.onTrack }}
-                ></div>
-                <span className="text-2xl font-bold text-gray-900">{filterCounts.onTrack}</span>
-              </div>
-              <div className="text-left">
-                <div className="text-sm font-semibold text-gray-900">On Track</div>
-                <div className="text-xs text-gray-500">85-94%</div>
-              </div>
-            </button>
 
-            <button
-              onClick={() => {
-                setSelectedFilter(selectedFilter === 'inProgress' ? null : 'inProgress');
-                setSelectedSectorId(null);
-                setSelectedIndicatorId(null);
-              }}
-              className={`p-4 rounded-lg border-2 transition-all hover:shadow-lg ${
-                selectedFilter === 'inProgress'
-                  ? 'border-yellow-500 bg-yellow-50'
-                  : 'border-gray-200 bg-white hover:border-yellow-500'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div
-                  className="w-4 h-4 rounded"
-                  style={{ backgroundColor: PERFORMANCE_COLORS.inProgress }}
-                ></div>
-                <span className="text-2xl font-bold text-gray-900">{filterCounts.inProgress}</span>
-              </div>
-              <div className="text-left">
-                <div className="text-sm font-semibold text-gray-900">In Progress</div>
-                <div className="text-xs text-gray-500">65-84%</div>
-              </div>
-            </button>
+  // Search-filtered indicators (applies indicatorSearch to the full list)
 
-            <button
-              onClick={() => {
-                setSelectedFilter(selectedFilter === 'weakPerformance' ? null : 'weakPerformance');
-                setSelectedSectorId(null);
-                setSelectedIndicatorId(null);
-              }}
-              className={`p-4 rounded-lg border-2 transition-all hover:shadow-lg ${
-                selectedFilter === 'weakPerformance'
-                  ? 'border-orange-500 bg-orange-50'
-                  : 'border-gray-200 bg-white hover:border-orange-500'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div
-                  className="w-4 h-4 rounded"
-                  style={{ backgroundColor: PERFORMANCE_COLORS.weakPerformance }}
-                ></div>
-                <span className="text-2xl font-bold text-gray-900">{filterCounts.weakPerformance}</span>
-              </div>
-              <div className="text-left">
-                <div className="text-sm font-semibold text-gray-900">Weak Performance</div>
-                <div className="text-xs text-gray-500">50-64%</div>
-              </div>
-            </button>
+  const searchFilteredIndicators = React.useMemo(() => {
 
-            <button
-              onClick={() => {
-                setSelectedFilter(selectedFilter === 'requiresIntervention' ? null : 'requiresIntervention');
-                setSelectedSectorId(null);
-                setSelectedIndicatorId(null);
-              }}
-              className={`p-4 rounded-lg border-2 transition-all hover:shadow-lg ${
-                selectedFilter === 'requiresIntervention'
-                  ? 'border-red-600 bg-red-50'
-                  : 'border-gray-200 bg-white hover:border-red-500'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div
-                  className="w-4 h-4 rounded"
-                  style={{ backgroundColor: PERFORMANCE_COLORS.requiresIntervention }}
-                ></div>
-                <span className="text-2xl font-bold text-gray-900">{filterCounts.requiresIntervention}</span>
-              </div>
-              <div className="text-left">
-                <div className="text-sm font-semibold text-gray-900">Requires Intervention</div>
-                <div className="text-xs text-gray-500">0-49%</div>
-              </div>
-            </button>
+    if (!indicatorSearch) return allIndicators;
 
-            <button
-              onClick={() => {
-                setSelectedFilter(selectedFilter === 'noData' ? null : 'noData');
-                setSelectedSectorId(null);
-                setSelectedIndicatorId(null);
-              }}
-              className={`p-4 rounded-lg border-2 transition-all hover:shadow-lg ${
-                selectedFilter === 'noData'
-                  ? 'border-gray-500 bg-gray-100'
-                  : 'border-gray-200 bg-white hover:border-gray-400'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div
-                  className="w-4 h-4 rounded"
-                  style={{ backgroundColor: PERFORMANCE_COLORS.noData }}
-                ></div>
-                <span className="text-2xl font-bold text-gray-900">{filterCounts.noData}</span>
-              </div>
-              <div className="text-left">
-                <div className="text-sm font-semibold text-gray-900">No Data</div>
-                <div className="text-xs text-gray-500">N/A</div>
-              </div>
-            </button>
-          </div>
+    const q = indicatorSearch.toLowerCase();
 
-          {selectedFilter && (
-            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-blue-900">
-                  Showing {filteredIndicators.length} indicator{filteredIndicators.length !== 1 ? 's' : ''} in "{selectedFilter === 'achieved' ? 'Achieved' : selectedFilter === 'onTrack' ? 'On Track' : selectedFilter === 'inProgress' ? 'In Progress' : selectedFilter === 'weakPerformance' ? 'Weak Performance' : selectedFilter === 'requiresIntervention' ? 'Requires Intervention' : 'No Data'}" category
-                </span>
-              </div>
-              <button
-                onClick={() => {
-                  setSelectedFilter(null);
-                  setSelectedSectorId(null);
-                  setSelectedIndicatorId(null);
-                }}
-                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-              >
-                Clear Filter
-              </button>
-            </div>
-          )}
+    return allIndicators.filter(ind => ind.name.toLowerCase().includes(q));
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left Panel: Sector List or Indicator List */}
-            <div className="lg:col-span-1">
-              <div className="bg-white rounded-xl shadow-lg p-6">
-                {selectedFilter && filteredBySector ? (
-                  <>
-                    <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-xl font-bold text-gray-900">Filtered Indicators</h2>
-                      <button
-                        onClick={() => {
-                          setSelectedFilter(null);
-                          setSelectedSectorId(null);
-                          setSelectedIndicatorId(null);
-                        }}
-                        className="text-sm text-emerald-600 hover:text-emerald-700"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                    {filteredBySector.length === 0 ? (
-                      <div className="text-center text-gray-500 py-8">
-                        No indicators found in this category
-                      </div>
-                    ) : (
-                      <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                        {filteredBySector.map(({ sector, indicators }) => (
-                          <div key={sector.id} className="border border-gray-200 rounded-lg p-4">
-                            <h3 className="font-semibold text-gray-800 mb-3">{sector.name}</h3>
-                            <div className="space-y-2">
-                              {indicators.map((indicator) => {
-                                const indPerf = getPerformanceCategory(indicator.performance_percentage);
-                                return (
-                                  <button
-                                    key={indicator.id}
-                                    onClick={() => {
-                                      setSelectedSectorId(sector.id);
-                                      setSelectedIndicatorId(indicator.id);
-                                      setIndicatorDetail(null);
-                                    }}
-                                    className={`w-full text-left p-3 border rounded hover:border-emerald-500 hover:bg-emerald-50 transition-all ${
-                                      selectedIndicatorId === indicator.id
-                                        ? 'border-emerald-500 bg-emerald-50'
-                                        : 'border-gray-200'
-                                    }`}
-                                  >
-                                    <div className="flex items-center justify-between mb-1">
-                                      <span className="text-sm font-medium text-gray-900">{indicator.name}</span>
-                                      <div
-                                        className="px-2 py-1 rounded text-xs font-semibold text-white"
-                                        style={{ backgroundColor: indPerf.color }}
-                                      >
-                                        {indicator.performance_percentage !== null
-                                          ? `${indicator.performance_percentage.toFixed(1)}%`
-                                          : 'N/A'}
-                                      </div>
-                                    </div>
-                                    <div className="text-xs text-gray-500">{indPerf.label}</div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                ) : !selectedSectorId ? (
-                  <>
-                    <h2 className="text-xl font-bold text-gray-900 mb-4">Sectors</h2>
-                    <div className="space-y-3">
-                      {indicatorData.sectors.map((sector) => {
-                        const perf = getPerformanceCategory(sector.performance_percentage);
-                        return (
-                          <button
-                            key={sector.id}
-                            onClick={() => {
-                              setSelectedSectorId(sector.id);
-                              setSelectedIndicatorId(null);
-                              setIndicatorDetail(null);
-                            }}
-                            className="w-full text-left p-4 border-2 border-gray-200 rounded-lg hover:border-emerald-500 hover:bg-emerald-50 transition-all"
-                          >
-                            <div className="flex items-center justify-between mb-2">
-                              <h3 className="font-semibold text-gray-900">{sector.name}</h3>
-                              <div
-                                className="px-3 py-1 rounded-full text-sm font-semibold text-white"
-                                style={{ backgroundColor: perf.color }}
-                              >
-                                {sector.performance_percentage !== null
-                                  ? `${sector.performance_percentage.toFixed(1)}%`
-                                  : 'N/A'}
-                              </div>
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              {perf.label}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between mb-4">
-                      <button
-                        onClick={() => {
-                          setSelectedSectorId(null);
-                          setSelectedIndicatorId(null);
-                          setIndicatorDetail(null);
-                        }}
-                        className="text-emerald-600 hover:text-emerald-700 font-medium"
-                      >
-                        ← Back to Sectors
-                      </button>
-                    </div>
-                    <h2 className="text-xl font-bold text-gray-900 mb-4">{selectedSector?.name}</h2>
-                    <div className="space-y-4">
-                      {/* Indicator Groups */}
-                      {selectedSector?.indicator_groups.map((group) => {
-                        const groupPerf = getPerformanceCategory(group.performance_percentage);
-                        return (
-                          <div key={group.id} className="border border-gray-200 rounded-lg p-4">
-                            <div className="flex items-center justify-between mb-3">
-                              <h3 className="font-semibold text-gray-800">{group.name}</h3>
-                              <div
-                                className="px-2 py-1 rounded text-xs font-semibold text-white"
-                                style={{ backgroundColor: groupPerf.color }}
-                              >
-                                {group.performance_percentage !== null
-                                  ? `${group.performance_percentage.toFixed(1)}%`
-                                  : 'N/A'}
-                              </div>
-                            </div>
-                            <div className="space-y-2">
-                              {group.indicators.map((indicator) => {
-                                const indPerf = getPerformanceCategory(indicator.performance_percentage);
-                                return (
-                                  <button
-                                    key={indicator.id}
-                                    onClick={() => setSelectedIndicatorId(indicator.id)}
-                                    className="w-full text-left p-3 border border-gray-200 rounded hover:border-emerald-500 hover:bg-emerald-50 transition-all"
-                                  >
-                                    <div className="flex items-center justify-between mb-1">
-                                      <span className="text-sm font-medium text-gray-900">{indicator.name}</span>
-                                      <div
-                                        className="px-2 py-1 rounded text-xs font-semibold text-white"
-                                        style={{ backgroundColor: indPerf.color }}
-                                      >
-                                        {indicator.performance_percentage !== null
-                                          ? `${indicator.performance_percentage.toFixed(1)}%`
-                                          : 'N/A'}
-                                      </div>
-                                    </div>
-                                    <div className="text-xs text-gray-500">{indPerf.label}</div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {/* Ungrouped Indicators */}
-                      {selectedSector?.ungrouped_indicators.length > 0 && (
-                        <div className="border border-gray-200 rounded-lg p-4">
-                          <h3 className="font-semibold text-gray-800 mb-3">Other Indicators</h3>
-                          <div className="space-y-2">
-                            {selectedSector.ungrouped_indicators.map((indicator) => {
-                              const indPerf = getPerformanceCategory(indicator.performance_percentage);
-                              return (
-                                <button
-                                  key={indicator.id}
-                                  onClick={() => setSelectedIndicatorId(indicator.id)}
-                                  className="w-full text-left p-3 border border-gray-200 rounded hover:border-emerald-500 hover:bg-emerald-50 transition-all"
-                                >
-                                  <div className="flex items-center justify-between mb-1">
-                                    <span className="text-sm font-medium text-gray-900">{indicator.name}</span>
-                                    <div
-                                      className="px-2 py-1 rounded text-xs font-semibold text-white"
-                                      style={{ backgroundColor: indPerf.color }}
-                                    >
-                                      {indicator.performance_percentage !== null
-                                        ? `${indicator.performance_percentage.toFixed(1)}%`
-                                        : 'N/A'}
-                                    </div>
-                                  </div>
-                                  <div className="text-xs text-gray-500">{indPerf.label}</div>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
+  }, [allIndicators, indicatorSearch]);
 
-            {/* Right Panel: Indicator Detail */}
-            <div className="lg:col-span-2">
-              {selectedFilter && !selectedIndicatorId ? (
-                <div className="bg-white rounded-xl shadow-lg p-12 text-center">
-                  <div className="text-gray-500 mb-4">
-                    <p className="text-lg font-semibold mb-2">Filter Active: {selectedFilter === 'achieved' ? 'Achieved' : selectedFilter === 'onTrack' ? 'On Track' : selectedFilter === 'inProgress' ? 'In Progress' : selectedFilter === 'weakPerformance' ? 'Weak Performance' : selectedFilter === 'requiresIntervention' ? 'Requires Intervention' : 'No Data'}</p>
-                    <p className="text-sm">Click on an indicator from the left panel to view detailed performance</p>
-                  </div>
-                </div>
-              ) : selectedIndicatorId && selectedIndicator ? (
-                <div className="bg-white rounded-xl shadow-lg p-6">
-                  {loadingIndicatorDetail ? (
-                    <div className="flex items-center justify-center h-64">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
-                    </div>
-                  ) : indicatorDetail ? (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* Left: Basic Info */}
-                      <div>
-                        <h2 className="text-2xl font-bold text-gray-900 mb-4">{indicatorDetail.indicator.name}</h2>
-                        <div className="space-y-3">
-                          <div>
-                            <label className="text-sm font-semibold text-gray-600">Description</label>
-                            <p className="text-gray-900 mt-1">
-                              {indicatorDetail.indicator.description || 'No description available'}
-                            </p>
-                          </div>
-                          <div>
-                            <label className="text-sm font-semibold text-gray-600">Unit</label>
-                            <p className="text-gray-900 mt-1">{indicatorDetail.indicator.unit || 'N/A'}</p>
-                          </div>
-                          <div>
-                            <label className="text-sm font-semibold text-gray-600">Responsible Department</label>
-                            <p className="text-gray-900 mt-1">{indicatorDetail.indicator.department_name}</p>
-                          </div>
-                        </div>
-                      </div>
 
-                      {/* Right: Charts */}
-                      <div>
-                        <div className="flex items-center justify-between mb-4">
-                          <div>
-                            <h3 className="text-lg font-semibold text-gray-900">Performance</h3>
-                            <p className="text-xs text-gray-500 mt-1">
-                              Year: {year} ዓ.ም ({toGregorianYearFromEthiopian(year)} G.C.)
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => setViewMode('yearly')}
-                              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                viewMode === 'yearly'
-                                  ? 'bg-emerald-600 text-white'
-                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                              }`}
-                            >
-                              Yearly
-                            </button>
-                            <button
-                              onClick={() => setViewMode('quarterly')}
-                              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                                viewMode === 'quarterly'
-                                  ? 'bg-emerald-600 text-white'
-                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                              }`}
-                            >
-                              Quarterly
-                            </button>
-                          </div>
-                        </div>
 
-                        {viewMode === 'yearly' ? (
-                          <ResponsiveContainer width="100%" height={300}>
-                            <ComposedChart
-                              data={indicatorDetail.yearly_data.map((item) => ({
-                                ...item,
-                                ethiopianYear: toEthiopianYearFromGregorian(item.year),
-                                yearLabel: `${toEthiopianYearFromGregorian(item.year)} ዓ.ም`,
-                              }))}
-                            >
-                              <CartesianGrid strokeDasharray="3 3" />
-                              <XAxis 
-                                dataKey="ethiopianYear" 
-                                label={{ value: 'Ethiopian Year (ዓ.ም)', position: 'insideBottom', offset: -5 }}
-                              />
-                              <YAxis yAxisId="left" />
-                              <Tooltip 
-                                formatter={(value: any, name: string) => {
-                                  // Handle N/A values in yearly combo chart
-                                  if (name === 'Achieved' && (value === 0 || value === null)) {
-                                    return ['No Data', name];
-                                  }
-                                  if (name === 'Target' && (value === 0 || value === null)) {
-                                    return ['No Target', name];
-                                  }
-                                  return [value, name];
-                                }}
-                                labelFormatter={(label) => `Year: ${label} ዓ.ም`}
-                              />
-                              <Legend />
-                              <Bar yAxisId="left" dataKey="target" fill="#3b82f6" name="Target" />
-                              <Line
-                                yAxisId="left"
-                                type="monotone"
-                                dataKey="achieved"
-                                stroke="#10b981"
-                                strokeWidth={2}
-                                name="Achieved"
-                                connectNulls={false} // Don't connect lines through missing data
-                              />
-                            </ComposedChart>
-                          </ResponsiveContainer>
-                        ) : (
-                          <ResponsiveContainer width="100%" height={300}>
-                            <ComposedChart 
-                              data={
-                                // Filter quarterly data based on quarter selection
-                                quarterMonths 
-                                  ? indicatorDetail.quarterly_data.filter((_, index) => {
-                                      const quarterNum = index + 1;
-                                      const quarterMonthsMap: Record<number, number> = { 1: 3, 2: 6, 3: 9, 4: 12 };
-                                      return quarterMonthsMap[quarterNum] <= quarterMonths;
-                                    })
-                                  : indicatorDetail.quarterly_data
-                              }
-                            >
-                              <CartesianGrid strokeDasharray="3 3" />
-                              <XAxis 
-                                dataKey="quarter"
-                                label={{ value: `Quarters for ${year} ዓ.ም`, position: 'insideBottom', offset: -5 }}
-                              />
-                              <YAxis yAxisId="left" />
-                              <Tooltip 
-                                formatter={(value: any, name: string) => {
-                                  // Handle N/A values in quarterly combo chart
-                                  if (name === 'Achieved' && (value === 0 || value === null)) {
-                                    return ['No Data', name];
-                                  }
-                                  if (name === 'Target' && (value === 0 || value === null)) {
-                                    return ['No Target', name];
-                                  }
-                                  return [value, name];
-                                }}
-                                labelFormatter={(label) => `${label} - ${year} ዓ.ም`}
-                              />
-                              <Legend />
-                              <Bar yAxisId="left" dataKey="target" fill="#3b82f6" name="Target" />
-                              <Line
-                                yAxisId="left"
-                                type="monotone"
-                                dataKey="achieved"
-                                stroke="#10b981"
-                                strokeWidth={2}
-                                name="Achieved"
-                                connectNulls={false} // Don't connect lines through missing data
-                              />
-                            </ComposedChart>
-                          </ResponsiveContainer>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-center text-gray-500 py-12">Loading indicator details...</div>
-                  )}
-                </div>
-              ) : (
-                <div className="bg-white rounded-xl shadow-lg p-12 text-center text-gray-500">
-                  Select a sector to view indicators, then click on an indicator to see detailed performance
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+  // Filtered indicators for the active range filter
+
+  const rangeFilteredIndicators = React.useMemo(() => {
+
+    if (!selectedRangeLabel) return [];
+
+    return searchFilteredIndicators.filter(ind => matchesRange(ind.performance_percentage, selectedRangeLabel));
+
+  }, [searchFilteredIndicators, selectedRangeLabel]);
+
+
+
+  // Derived selections
+
+  const selectedSector = data?.sectors.find(s => s.id === selectedSectorId);
+
+  const selectedDept = selectedSector?.departments.find(d => d.id === selectedDeptId);
+
+
+
+  // --- Handlers ---
+
+  const handleSectorClick = (id: number) => {
+
+    if (selectedSectorId === id) {
+
+      setSelectedSectorId(null);
+
+      setSelectedDeptId(null);
+
+    } else {
+
+      setSelectedSectorId(id);
+
+      setSelectedDeptId(null);
+
+    }
+
   };
 
-  if (!data && activeTab === 'dashboard') return null;
+
+
+  const handleDeptClick = (id: number) => {
+
+    setSelectedDeptId(id === selectedDeptId ? null : id);
+
+  };
+
+
+
+  const handleDeptFilter = (deptId: number | null) => {
+
+    setFilterDeptId(deptId);
+
+    if (deptId === null) {
+
+      setSelectedSectorId(null);
+
+      setSelectedDeptId(null);
+
+      return;
+
+    }
+
+    const match = allDepartments.find(d => d.id === deptId);
+
+    if (match) {
+
+      setSelectedSectorId(match.sectorId);
+
+      setSelectedDeptId(match.id);
+
+    }
+
+  };
+
+
+
+  // --- Render Helpers ---
+
+  const renderModalChart = () => {
+
+    if (!modalData) return null;
+
+    
+
+    let chartData: any[] = [];
+
+    
+
+    if (modalView === 'yearly') {
+      chartData = modalData.yearly_data.map(d => {
+        const ethYear = toEthiopianYearFromGregorian(d.year);
+        return {
+          name: `${ethYear} ዓ.ም`,
+          Target: d.target,
+          Achievement: d.achieved,
+          PerformanceLine: d.achieved
+        };
+      });
+
+    } else {
+
+      const currentQData = modalData.current_year_quarters;
+
+      const lastQData = modalData.last_year_quarters;
+
+      
+
+      let quartersToInclude = [1, 2, 3, 4];
+
+      if (quarterMonths) {
+
+          const map: Record<number, number> = {1: 3, 2: 6, 3: 9, 4: 12};
+
+          quartersToInclude = [1, 2, 3, 4].filter(q => map[q] <= quarterMonths);
+
+      }
+
+
+
+      for (let i = 0; i < currentQData.length; i++) {
+
+        const cQ = currentQData[i];
+
+        const lQ = lastQData[i];
+
+        
+
+        if (!quartersToInclude.includes(cQ.quarter)) continue;
+
+        if (cQ.target === 0 && (cQ.achieved === null || cQ.achieved === 0)) continue;
+
+        
+
+        chartData.push({
+
+          name: `Q${cQ.quarter} (Prev Yr)`,
+
+          Target: lQ.target,
+
+          Achievement: lQ.achieved || 0,
+
+          PerformanceLine: lQ.achieved || 0,
+
+        });
+
+        chartData.push({
+
+          name: `Q${cQ.quarter} (Curr Yr)`,
+
+          Target: cQ.target,
+
+          Achievement: cQ.achieved || 0,
+
+          PerformanceLine: cQ.achieved || 0,
+
+        });
+
+      }
+
+    }
+
+
+
+    if (chartData.length === 0) {
+
+      return <div className="h-64 flex items-center justify-center text-gray-500">No chart data available</div>;
+
+    }
+
+
+
+    return (
+
+      <div className="h-80 w-full mt-4">
+
+        <ResponsiveContainer width="100%" height="100%">
+
+          <ComposedChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+
+            <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+
+            <YAxis yAxisId="left" tick={{ fontSize: 12 }} />
+
+            <Tooltip />
+
+            <Legend />
+
+            <Bar yAxisId="left" dataKey="Target" fill="#93c5fd" radius={[4, 4, 0, 0]} maxBarSize={40} />
+
+            <Bar yAxisId="left" dataKey="Achievement" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={40} />
+
+            <Line
+              yAxisId="left"
+              type="monotone"
+              dataKey="PerformanceLine"
+              stroke="#a855f7"
+              strokeWidth={2}
+              dot={{ r: 4 }}
+              name="Achievement Trend"
+            />
+
+          </ComposedChart>
+
+        </ResponsiveContainer>
+
+      </div>
+
+    );
+
+  };
+
+
+
+  const renderModalTable = () => {
+
+    if (!modalData) return null;
+
+
+
+    if (modalView === 'yearly') {
+
+      return (
+
+        <table className="min-w-full divide-y divide-gray-200">
+
+          <thead className="bg-gray-50">
+
+            <tr>
+
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Year</th>
+
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Plan</th>
+
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Performance</th>
+
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Percent</th>
+
+            </tr>
+
+          </thead>
+
+          <tbody className="bg-white divide-y divide-gray-200">
+
+            {modalData.yearly_data.map((row, idx) => {
+               const ethY = toEthiopianYearFromGregorian(row.year);
+               return (
+                <tr key={idx}>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{ethY} ዓ.ም</td>
+
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{formatValue(row.target)}</td>
+
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{formatValue(row.achieved)}</td>
+
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-right" style={{ color: getPerformanceColor(row.percentage) }}>
+
+                    {formatPct(row.percentage)}
+
+                  </td>
+
+                </tr>
+
+              );
+
+            })}
+
+          </tbody>
+
+        </table>
+
+      );
+
+    } else {
+
+      let quartersToInclude = [1, 2, 3, 4];
+
+      if (quarterMonths) {
+
+          const map: Record<number, number> = {1: 3, 2: 6, 3: 9, 4: 12};
+
+          quartersToInclude = [1, 2, 3, 4].filter(q => map[q] <= quarterMonths);
+
+      }
+
+
+
+      return (
+
+        <table className="min-w-full divide-y divide-gray-200">
+
+          <thead className="bg-gray-50">
+
+            <tr>
+
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Year-Quarter</th>
+
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Plan</th>
+
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Performance</th>
+
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Percent</th>
+
+            </tr>
+
+          </thead>
+
+          <tbody className="bg-white divide-y divide-gray-200">
+
+            {modalData.current_year_quarters
+
+              .filter(row => quartersToInclude.includes(row.quarter))
+
+              .map((row, idx) => (
+
+              <tr key={idx}>
+
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{year} - {row.quarter * 3}M</td>
+
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+
+                  {row.target === 0 && row.achieved === null ? 'N/A' : formatValue(row.target)}
+
+                </td>
+
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
+
+                  {row.achieved === null ? 'N/A' : formatValue(row.achieved)}
+
+                </td>
+
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-right" style={{ color: getPerformanceColor(row.percentage) }}>
+
+                  {row.target === 0 || row.achieved === null ? '—' : formatPct(row.percentage)}
+
+                </td>
+
+              </tr>
+
+            ))}
+
+          </tbody>
+
+        </table>
+
+      );
+
+    }
+
+  };
+
+
+
+  // --- Main Render ---
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
-            <h1 className="text-3xl font-bold text-gray-900">Minister's Dashboard</h1>
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="w-48">
-                <YearFilter
-                  value={year}
-                  onChange={setYear}
-                  variant="dropdown"
-                  showLabel={false}
-                />
-              </div>
-              <div className="w-48">
-                <QuarterFilter
-                  value={quarterMonths}
-                  onChange={setQuarterMonths}
-                  variant="dropdown"
-                  showLabel={false}
-                />
-              </div>
-            </div>
+
+    <div className="min-h-screen bg-gray-50 pb-12">
+
+      <style dangerouslySetInnerHTML={marqueeStyleTag} />
+
+      {/* 1. Hero Section — Background Image */}
+
+      <div className="relative">
+
+        <div className="h-[340px] md:h-[400px] w-full relative overflow-hidden">
+
+          <div
+
+            className="absolute inset-0"
+
+            style={{ transform: `scale(${heroScale})`, transition: heroTransition }}
+
+            aria-hidden
+
+          >
+
+            <div
+
+              className="w-full h-full bg-cover bg-center"
+
+              style={{ backgroundImage: `url(${homePic})` }}
+
+            />
+
           </div>
-          <p className="text-gray-600">
-            National planning and performance overview across all State Minister Sectors
-          </p>
+
+          <div
+
+            className="absolute inset-0"
+
+            style={{ backgroundImage: 'linear-gradient(rgba(30, 64, 130, 0.35), rgba(30, 64, 130, 0.25))' }}
+
+            aria-hidden
+
+          />
+
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center px-4 overflow-hidden">
+
+            <div className="hero-marquee-text uppercase tracking-[0.35em] text-xs sm:text-sm md:text-base font-semibold text-white/90 whitespace-nowrap bg-slate-900/30 backdrop-blur-sm px-6 py-3 rounded-full border border-white/30 shadow-[0_10px_45px_rgba(15,23,42,0.35)]">
+
+              ENHANCING AGRICULTURE PRODUCTION GROWTH FOR FOOD SELF-RELIANCE
+
+            </div>
+
+          </div>
+
         </div>
 
-        {/* Tabs */}
-        <div className="mb-6 border-b border-gray-200">
-          <div className="flex gap-4">
-            <button
-              onClick={() => setActiveTab('indicators')}
-              className={`px-6 py-3 font-semibold border-b-2 transition-colors ${
-                activeTab === 'indicators'
-                  ? 'border-emerald-600 text-emerald-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              Indicator Performance
-            </button>
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`px-6 py-3 font-semibold border-b-2 transition-colors ${
-                activeTab === 'dashboard'
-                  ? 'border-emerald-600 text-emerald-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              Overview Dashboard
-            </button>
-          </div>
-        </div>
 
-        {activeTab === 'indicators' ? (
-          renderIndicatorPerformanceView()
-        ) : (
-          <div>
 
-        {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
-            {error}
-          </div>
-        )}
+        {/* White card overlapping the image bottom */}
 
-        {/* Sector-wise Performance Comparison Chart (normalized) */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xl font-bold text-gray-900">Sector-wise Performance Comparison</h2>
-            <span className="text-sm text-gray-500">Average of indicator % (actual ÷ target × 100)</span>
-          </div>
-          <ResponsiveContainer width="100%" height={400}>
-            {sectorPerformanceData.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-gray-500">No performance data available</div>
-            ) : (
-              <BarChart data={sectorPerformanceData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis
-                  dataKey="sector"
-                  angle={-45}
-                  textAnchor="end"
-                  height={120}
-                  interval={0}
-                />
-                <YAxis />
-                <Tooltip 
-                  formatter={(value: number, name: string) => {
-                    if (value === 0) {
-                      // Check if this is truly N/A (no valid indicators) vs actual 0% performance
-                      const sectorData = sectorPerformanceData.find(s => s.performance === 0);
-                      const hasValidIndicators = sectorData && sectorData.performance > 0;
-                      return hasValidIndicators ? [`${value.toFixed(1)}%`, name] : ['No Data', name];
-                    }
-                    return [`${value.toFixed(1)}%`, name];
-                  }}
-                />
-                <Legend />
-                <Bar 
-                  dataKey="performance" 
-                  fill={COLORS.primary} 
-                  name="Average Performance (%)"
-                  shape={(props: any) => {
-                    const { performance } = props;
-                    // Use different color for N/A data (0% with no valid indicators)
-                    if (performance === 0) {
-                      const sectorData = sectorPerformanceData.find(s => s.performance === 0);
-                      const hasValidIndicators = sectorData && sectorData.performance > 0;
-                      if (!hasValidIndicators) {
-                        return <rect {...props} fill="#9ca3af" opacity={0.5} />;
-                      }
-                    }
-                    return <rect {...props} fill={COLORS.primary} />;
-                  }}
-                />
-              </BarChart>
-            )}
-          </ResponsiveContainer>
-          <div className="flex items-center gap-4 mt-4 text-xs text-gray-500">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-emerald-600 rounded"></div>
-              <span>Valid Performance Data</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-gray-400 rounded opacity-50"></div>
-              <span>No Data Available</span>
-            </div>
-          </div>
-        </div>
+        <div className="relative -mt-24 mx-auto max-w-5xl px-4">
 
-        {/* Quarterly Performance Trend by Sector (normalized) */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xl font-bold text-gray-900">Quarterly Performance Trend by Sector</h2>
-            <span className="text-sm text-gray-500">Average of quarterly indicator % per sector</span>
-          </div>
-          <ResponsiveContainer width="100%" height={400}>
-            {sectorQuarterTrend.length === 0 || sectorList.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-gray-500">No quarterly data available</div>
-            ) : (
-              <LineChart data={sectorQuarterTrend}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="quarter" />
-                <YAxis />
-                <Tooltip 
-                  formatter={(value: number, name: string) => {
-                    if (value === 0) {
-                      // Check if this is N/A vs actual 0% performance
-                      return ['No Data', name];
-                    }
-                    return [`${(value as number).toFixed(1)}%`, name];
-                  }}
-                />
-                <Legend />
-                {sectorList.map((sectorName, idx) => {
-                  const colors = ['#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#22c55e', '#2563eb', '#14b8a6'];
-                  return (
-                    <Line
-                      key={sectorName}
-                      type="monotone"
-                      dataKey={sectorName}
-                      stroke={colors[idx % colors.length]}
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                      connectNulls={false} // Don't connect lines through null/missing data
-                      name={sectorName}
-                    />
-                  );
-                })}
-              </LineChart>
-            )}
-          </ResponsiveContainer>
-          <div className="flex items-center gap-4 mt-4 text-xs text-gray-500">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-0 border-t-2 border-emerald-600"></div>
-              <span>Valid Performance Data</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-0 border-t-2 border-gray-400 border-dashed"></div>
-              <span>No Data Available (gaps in lines)</span>
-            </div>
-          </div>
-        </div>
+          <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 md:p-8 flex flex-col md:flex-row items-center gap-8">
 
-        {/* General Quarterly Performance Trend (normalized) */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xl font-bold text-gray-900">General Quarterly Performance Trend</h2>
-            <span className="text-sm text-gray-500">Average of all sector quarterly scores</span>
-          </div>
-          <ResponsiveContainer width="100%" height={320}>
-            {generalQuarterTrend.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-gray-500">No quarterly data available</div>
-            ) : (
-              <LineChart data={generalQuarterTrend}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="quarter" />
-                <YAxis />
-                <Tooltip formatter={(value: number) => `${(value as number).toFixed(1)}%`} />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="general"
-                  stroke={COLORS.secondary}
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                  name="Overall Quarterly Average"
-                />
-              </LineChart>
-            )}
-          </ResponsiveContainer>
-        </div>
+            {/* Left: Performance bar + year */}
 
-        {/* Approval Status Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h2 className="text-xl font-bold text-gray-900 mb-6">Approval Status Overview</h2>
-            {approvalPieData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={approvalPieData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, percent }) => `${name}: ${((percent || 0) * 100).toFixed(0)}%`}
-                    outerRadius={100}
-                    fill="#8884d8"
-                    dataKey="value"
+            <div className="flex-1 w-full">
+
+              <div className="mb-3">
+
+                <div className="relative w-full h-10 bg-gray-200 rounded-full overflow-hidden">
+
+                  <div
+
+                    className="h-full rounded-full flex items-center justify-center text-white font-bold text-sm transition-all duration-1000"
+
+                    style={{
+
+                      width: `${Math.min(100, data?.ministry_performance || 0)}%`,
+
+                      backgroundColor: getPerformanceColor(data?.ministry_performance ?? null),
+
+                    }}
+
                   >
-                    {approvalPieData.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="text-center text-gray-500 py-12">No approval data available</div>
-            )}
+
+                    {data?.ministry_performance ? `${data.ministry_performance.toFixed(2)}%` : 'N/A'}
+
+                  </div>
+
+                </div>
+
+              </div>
+
+              <span className="inline-block px-3 py-1 border border-amber-400 text-amber-700 rounded-full text-xs font-semibold">
+
+                {year}
+
+              </span>
+
+            </div>
+
+
+
+            {/* Right: MoA Logo + text */}
+
+            <div className="flex flex-col items-center flex-shrink-0">
+
+              <div className="w-24 h-24 md:w-28 md:h-28 rounded-full bg-white shadow-lg border border-gray-100 flex items-center justify-center overflow-hidden -mt-16 md:-mt-20">
+
+                <img src={moaLogo} alt="Ministry of Agriculture" className="w-20 h-20 md:w-24 md:h-24 object-contain" />
+
+              </div>
+
+              <h2 className="mt-3 text-lg font-bold text-gray-800 text-center">Ministry of Agriculture</h2>
+
+              <span className="text-sm text-gray-400">MoA</span>
+
+            </div>
+
           </div>
 
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h2 className="text-xl font-bold text-gray-900 mb-6">Submissions by Stage</h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stage</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Count</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  <tr>
-                    <td className="px-4 py-3 text-gray-900">Draft</td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{data.approval_stages.draft}</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-3 text-gray-900">Submitted</td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-900">{data.approval_stages.submitted}</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-3 text-gray-900">Approved</td>
-                    <td className="px-4 py-3 text-right font-semibold text-green-600">{data.approval_stages.approved}</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-3 text-gray-900">Validated</td>
-                    <td className="px-4 py-3 text-right font-semibold text-blue-600">{data.approval_stages.validated}</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-3 text-gray-900">Final Approved</td>
-                    <td className="px-4 py-3 text-right font-semibold text-green-700">{data.approval_stages.final_approved}</td>
-                  </tr>
-                  <tr>
-                    <td className="px-4 py-3 text-gray-900">Rejected</td>
-                    <td className="px-4 py-3 text-right font-semibold text-red-600">{data.approval_stages.rejected}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
         </div>
 
-        {/* Indicators at Risk Table */}
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-8">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Indicators at Risk</h2>
-          {data.indicators_at_risk.length === 0 ? (
-            <div className="text-center text-gray-500 py-8">No indicators at risk</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Indicator</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Department</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Target</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Achieved</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Gap</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Progress</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Risk Level</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {data.indicators_at_risk.map((indicator, idx) => (
-                    <tr key={idx} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-gray-900 font-medium">{indicator.indicator_name}</td>
-                      <td className="px-4 py-3 text-gray-600">{indicator.sector_name}</td>
-                      <td className="px-4 py-3 text-gray-600">{indicator.department_name}</td>
-                      <td className="px-4 py-3 text-right text-gray-900">{indicator.target.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                      <td className="px-4 py-3 text-right text-gray-900">{indicator.achieved.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                      <td className="px-4 py-3 text-right text-red-600 font-semibold">{indicator.gap.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                      <td className="px-4 py-3 text-right">
-                        <span className={`font-semibold ${indicator.progress_pct >= 75 ? 'text-green-600' : indicator.progress_pct >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
-                          {indicator.progress_pct.toFixed(1)}%
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            indicator.risk_level === 'HIGH'
-                              ? 'bg-red-100 text-red-800'
-                              : indicator.risk_level === 'MEDIUM'
-                              ? 'bg-yellow-100 text-yellow-800'
-                              : 'bg-green-100 text-green-800'
-                          }`}
-                        >
-                          {indicator.risk_level}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* Late or Rejected Submissions Table */}
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Late or Rejected Submissions</h2>
-          {data.late_or_rejected.length === 0 ? (
-            <div className="text-center text-gray-500 py-8">No late or rejected submissions</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Indicator</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sector</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Department</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Quarter</th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Comment</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {data.late_or_rejected.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <span className="inline-flex px-2 py-1 text-xs font-semibold rounded bg-blue-100 text-blue-800">
-                          {item.type}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-900 font-medium">{item.indicator_name}</td>
-                      <td className="px-4 py-3 text-gray-600">{item.sector_name}</td>
-                      <td className="px-4 py-3 text-gray-600">{item.department_name}</td>
-                      <td className="px-4 py-3 text-center text-gray-600">
-                        {item.quarter ? `Q${item.quarter}` : '-'}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span
-                          className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                            item.status === 'REJECTED'
-                              ? 'bg-red-100 text-red-800'
-                              : 'bg-yellow-100 text-yellow-800'
-                          }`}
-                        >
-                          {item.status}
-                          {item.days_late && ` (${item.days_late} days late)`}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 text-xs max-w-xs truncate" title={item.comment}>
-                        {item.comment || '-'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-          </div>
-        )}
       </div>
+
+
+
+      {/* 2. Filter Bar — labeled dropdowns */}
+
+      <div className="max-w-5xl mx-auto px-4 mt-4">
+
+        <div className="flex flex-wrap items-start justify-end gap-4">
+
+          {/* Row 1: Data type + Year */}
+
+          <div className="flex gap-4">
+
+            <div>
+
+              <label className="block text-xs text-gray-400 mb-1">Select data type</label>
+
+              <div className="relative">
+
+                <QuarterFilter 
+
+                  value={quarterMonths} 
+
+                  onChange={setQuarterMonths} 
+
+                  variant="compact" 
+
+                  showLabel={false} 
+
+                  className="text-gray-900 bg-white"
+
+                />
+
+              </div>
+
+            </div>
+
+            <div>
+
+              <label className="block text-xs text-gray-400 mb-1">Select time</label>
+
+              <YearFilter 
+
+                value={year} 
+
+                onChange={setYear} 
+
+                variant="compact" 
+
+                showLabel={false}
+
+                className="text-gray-900 bg-white" 
+
+              />
+
+            </div>
+
+          </div>
+
+
+
+          {/* Row 2: Organization + Search */}
+
+          <div className="flex gap-4">
+
+            <div className="w-64">
+
+              <label className="block text-xs text-gray-400 mb-1">Select Department</label>
+
+              <select
+
+                value={filterDeptId ?? ''}
+
+                onChange={e => handleDeptFilter(e.target.value ? Number(e.target.value) : null)}
+
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-900 focus:ring-2 focus:ring-blue-300 focus:border-blue-300 appearance-none"
+
+              >
+
+                <option value="">All</option>
+
+                {allDepartments.map(d => (
+
+                  <option key={d.id} value={d.id}>{d.name}</option>
+
+                ))}
+
+              </select>
+
+            </div>
+
+            <div className="w-56">
+
+              <label className="block text-xs text-gray-400 mb-1">Search indicators</label>
+
+              <div className="relative">
+
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+
+                <input
+
+                  type="text"
+
+                  value={indicatorSearch}
+
+                  onChange={e => setIndicatorSearch(e.target.value)}
+
+                  placeholder="Type to search..."
+
+                  className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-900 focus:ring-2 focus:ring-blue-300 focus:border-blue-300 placeholder-gray-400"
+
+                />
+
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+
+
+      {/* Performance Range Filter Cards */}
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-10">
+
+        <div className="flex items-center justify-between mb-6">
+
+          <h2 className="text-2xl font-bold text-blue-400">Indicator's Performances</h2>
+
+          <span className="text-sm italic text-gray-400">Click a card to see details</span>
+
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+
+          {PERFORMANCE_RANGES.map(item => {
+
+            const count = searchFilteredIndicators.filter(ind => matchesRange(ind.performance_percentage, item.label)).length;
+
+            const isActive = selectedRangeLabel === item.label;
+
+            return (
+
+              <button
+
+                key={item.label}
+
+                onClick={() => setSelectedRangeLabel(isActive ? null : item.label)}
+
+                className={`relative bg-gray-100 rounded-xl p-5 text-center transition-all duration-200 cursor-pointer border-2 hover:shadow-md ${
+
+                  isActive
+
+                    ? 'border-blue-400 shadow-lg bg-blue-50/40'
+
+                    : 'border-transparent hover:border-gray-200'
+
+                }`}
+
+              >
+
+                {/* Colored left accent bar */}
+
+                <div
+
+                  className="absolute left-0 top-3 bottom-3 w-1.5 rounded-r-full"
+
+                  style={{ backgroundColor: item.color }}
+
+                />
+
+                <div className="text-4xl font-bold text-gray-800 mb-1">{count}</div>
+
+                <div className="text-sm text-gray-500 font-medium">{item.label}</div>
+
+                <div className="text-xs text-gray-400 mt-1">{item.range}</div>
+
+              </button>
+
+            );
+
+          })}
+
+        </div>
+
+        {selectedRangeLabel && (
+
+          <div className="mt-3 text-right">
+
+            <button
+
+              onClick={() => setSelectedRangeLabel(null)}
+
+              className="px-3 py-1.5 rounded-full border border-red-200 bg-red-50 text-red-600 text-sm font-medium hover:bg-red-100 transition-colors"
+
+            >
+
+              ✕ Clear filter
+
+            </button>
+
+          </div>
+
+        )}
+
+      </div>
+
+
+
+      {/* Range-filtered indicator list */}
+
+      {selectedRangeLabel && !loading && data && (
+
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
+
+          <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6">
+
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
+
+              <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+
+                <span
+
+                  className="w-3.5 h-3.5 rounded-full inline-block"
+
+                  style={{ backgroundColor: PERFORMANCE_RANGES.find(r => r.label === selectedRangeLabel)?.color }}
+
+                />
+
+                {selectedRangeLabel} — {rangeFilteredIndicators.length} indicator{rangeFilteredIndicators.length !== 1 ? 's' : ''}
+
+              </h2>
+
+            </div>
+
+
+
+            {rangeFilteredIndicators.length === 0 ? (
+
+              <p className="text-gray-500 text-sm text-center py-6">No indicators in this range.</p>
+
+            ) : (
+
+              <div className="overflow-x-auto">
+
+                <table className="min-w-full divide-y divide-gray-200">
+
+                  <thead className="bg-gray-50">
+
+                    <tr>
+
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Indicator</th>
+
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Department</th>
+
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Target</th>
+
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Achieved</th>
+
+                      <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Performance</th>
+
+                    </tr>
+
+                  </thead>
+
+                  <tbody className="bg-white divide-y divide-gray-100">
+
+                    {rangeFilteredIndicators.map(ind => (
+
+                      <tr
+
+                        key={ind.id}
+
+                        onClick={() => setModalIndicatorId(ind.id)}
+
+                        className="hover:bg-emerald-50/50 cursor-pointer transition-colors"
+
+                      >
+
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-xs">
+
+                          <span className="hover:text-emerald-700 transition-colors">{ind.name}</span>
+
+                          <div className="text-xs text-gray-400 mt-0.5">{ind.unit}</div>
+
+                        </td>
+
+                        <td className="px-4 py-3 text-sm text-gray-600">{ind.departmentName}</td>
+
+                        <td className="px-4 py-3 text-sm text-gray-600 text-right tabular-nums">{formatValue(ind.target)}</td>
+
+                        <td className="px-4 py-3 text-sm text-gray-600 text-right tabular-nums">{formatValue(ind.achieved)}</td>
+
+                        <td className="px-4 py-3 text-right">
+
+                          <span
+
+                            className="inline-block px-2.5 py-1 rounded text-xs font-bold text-white"
+
+                            style={{ backgroundColor: getPerformanceColor(ind.performance_percentage) }}
+
+                          >
+
+                            {formatPct(ind.performance_percentage)}
+
+                          </span>
+
+                        </td>
+
+                      </tr>
+
+                    ))}
+
+                  </tbody>
+
+                </table>
+
+              </div>
+
+            )}
+
+          </div>
+
+        </div>
+
+      )}
+
+
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+
+        {loading && <div className="text-center py-12"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600 mx-auto"></div></div>}
+
+        {error && <div className="bg-red-50 text-red-600 p-4 rounded-xl text-center shadow-sm">{error}</div>}
+
+
+
+        {!loading && !error && data && (
+
+          <div className="space-y-12">
+
+            {/* 3. Sector Performance Cards */}
+
+            <section>
+
+              <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+
+                <Target className="w-6 h-6 text-emerald-600" />
+
+                Sector Performance
+
+              </h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+                {data.sectors.map(sector => (
+
+                  <div 
+
+                    key={sector.id}
+
+                    onClick={() => handleSectorClick(sector.id)}
+
+                    className={`cursor-pointer bg-white rounded-2xl p-6 shadow-sm border-2 transition-all duration-200 hover:shadow-md ${
+
+                      selectedSectorId === sector.id ? 'border-emerald-500 ring-4 ring-emerald-500/10' : 'border-gray-100 hover:border-emerald-200'
+
+                    }`}
+
+                  >
+
+                    <div className="flex justify-between items-start mb-4">
+
+                      <h3 className="text-lg font-bold text-gray-800 leading-snug pr-4">{sector.name}</h3>
+
+                      <div 
+
+                        className="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center font-bold text-white shadow-inner"
+
+                        style={{ backgroundColor: getPerformanceColor(sector.performance_percentage) }}
+
+                      >
+
+                        {sector.performance_percentage !== null ? Math.round(sector.performance_percentage) + '%' : '—'}
+
+                      </div>
+
+                    </div>
+
+                    <div className="w-full bg-gray-100 rounded-full h-2 mt-4 overflow-hidden">
+
+                      <div 
+
+                        className="h-2 rounded-full transition-all duration-1000" 
+
+                        style={{ 
+
+                          width: `${Math.min(100, sector.performance_percentage || 0)}%`,
+
+                          backgroundColor: getPerformanceColor(sector.performance_percentage)
+
+                        }}
+
+                      />
+
+                    </div>
+
+                  </div>
+
+                ))}
+
+              </div>
+
+            </section>
+
+
+
+            {/* 4. Department Performance Cards */}
+
+            {selectedSector && (
+
+              <section className="animate-in fade-in slide-in-from-top-4 duration-300">
+
+                <div className="flex items-center gap-2 mb-6">
+
+                  <ChevronRight className="text-gray-400" />
+
+                  <h2 className="text-2xl font-bold text-gray-900">
+
+                    Departments in {selectedSector.name}
+
+                  </h2>
+
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+                  {selectedSector.departments.map(dept => (
+
+                    <div 
+
+                      key={dept.id}
+
+                      onClick={() => handleDeptClick(dept.id)}
+
+                      className={`cursor-pointer bg-white rounded-xl p-5 shadow-sm border transition-all ${
+
+                        selectedDeptId === dept.id ? 'border-blue-500 bg-blue-50/30' : 'border-gray-200 hover:border-blue-300'
+
+                      }`}
+
+                    >
+
+                      <div className="flex justify-between items-center">
+
+                        <h4 className="font-semibold text-gray-800">{dept.name}</h4>
+
+                        <span 
+
+                          className="px-3 py-1 rounded-full text-sm font-bold text-white shadow-sm"
+
+                          style={{ backgroundColor: getPerformanceColor(dept.performance_percentage) }}
+
+                        >
+
+                          {formatPct(dept.performance_percentage)}
+
+                        </span>
+
+                      </div>
+
+                    </div>
+
+                  ))}
+
+                </div>
+
+              </section>
+
+            )}
+
+
+
+            {/* 5. Indicators & Groups */}
+
+            {selectedDept && (
+
+              <section className="animate-in fade-in slide-in-from-top-4 duration-300 bg-white rounded-2xl p-6 shadow-md border border-gray-100">
+
+                <div className="flex items-center gap-2 mb-6 pb-4 border-b border-gray-100">
+
+                  <Activity className="text-emerald-600" />
+
+                  <h2 className="text-xl font-bold text-gray-900">
+
+                    Indicators - {selectedDept.name}
+
+                  </h2>
+
+                </div>
+
+
+
+                <div className="space-y-8">
+
+                  {/* Group Cards */}
+
+                  {selectedDept.groups
+
+                    .map(group => ({
+
+                      ...group,
+
+                      filteredIndicators: group.indicators.filter(ind => {
+
+                        const nameMatch = !indicatorSearch || ind.name.toLowerCase().includes(indicatorSearch.toLowerCase());
+
+                        const rangeMatch = matchesRange(ind.performance_percentage, selectedRangeLabel);
+
+                        return nameMatch && rangeMatch;
+
+                      }),
+
+                    }))
+
+                    .filter(group => group.filteredIndicators.length > 0)
+
+                    .map(group => (
+
+                    <div key={group.id} className="bg-gray-50/50 rounded-xl p-6 border border-gray-100">
+
+                      <div className="flex items-center justify-between mb-6">
+
+                        <div>
+
+                          <span className="text-xs font-bold tracking-widest text-emerald-600 uppercase mb-1 block">Indicator Group</span>
+
+                          <h3 className="text-lg font-bold text-gray-900">{group.name}</h3>
+
+                        </div>
+
+                        <div 
+
+                          className="px-4 py-2 rounded-lg font-bold text-white shadow-sm flex items-center gap-2"
+
+                          style={{ backgroundColor: getPerformanceColor(group.performance_percentage) }}
+
+                        >
+
+                          Overall: {formatPct(group.performance_percentage)}
+
+                        </div>
+
+                      </div>
+
+                      
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                        {group.filteredIndicators.map(ind => (
+
+                          <div 
+
+                            key={ind.id} 
+
+                            onClick={() => setModalIndicatorId(ind.id)}
+
+                            className="bg-white p-4 rounded-xl border border-gray-200 hover:border-emerald-400 hover:shadow-md transition-all cursor-pointer group"
+
+                          >
+
+                            <div className="flex justify-between items-start mb-3">
+
+                              <h5 className="font-semibold text-gray-800 text-sm leading-snug group-hover:text-emerald-700 transition-colors pr-2">
+
+                                {ind.name}
+
+                              </h5>
+
+                              <span 
+
+                                className="px-2.5 py-1 rounded text-xs font-bold text-white shadow-sm whitespace-nowrap"
+
+                                style={{ backgroundColor: getPerformanceColor(ind.performance_percentage) }}
+
+                              >
+
+                                {formatPct(ind.performance_percentage)}
+
+                              </span>
+
+                            </div>
+
+                            <div className="flex items-center justify-between text-xs text-gray-500 mt-2">
+
+                              <span>Target: <strong className="text-gray-700">{formatValue(ind.target)}</strong></span>
+
+                              <span>Act: <strong className="text-gray-700">{formatValue(ind.achieved)}</strong> {ind.unit}</span>
+
+                            </div>
+
+                            {!ind.is_aggregatable && (
+
+                              <div className="mt-2 text-[10px] text-orange-600 font-medium bg-orange-50 inline-block px-2 py-0.5 rounded">
+
+                                Non-Aggregatable
+
+                              </div>
+
+                            )}
+
+                          </div>
+
+                        ))}
+
+                      </div>
+
+                    </div>
+
+                  ))}
+
+
+
+                  {/* Ungrouped Indicators */}
+
+                  {(() => {
+
+                    const filtered = selectedDept.ungrouped_indicators.filter(ind => {
+
+                      const nameMatch = !indicatorSearch || ind.name.toLowerCase().includes(indicatorSearch.toLowerCase());
+
+                      const rangeMatch = matchesRange(ind.performance_percentage, selectedRangeLabel);
+
+                      return nameMatch && rangeMatch;
+
+                    });
+
+                    return filtered.length > 0 ? (
+
+                      <div>
+
+                        <h3 className="text-sm font-bold tracking-widest text-gray-500 uppercase mb-4 pl-2">Individual Indicators</h3>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                          {filtered.map(ind => (
+
+                            <div 
+
+                              key={ind.id} 
+
+                              onClick={() => setModalIndicatorId(ind.id)}
+
+                              className="bg-white p-4 rounded-xl border border-gray-200 hover:border-emerald-400 hover:shadow-md transition-all cursor-pointer group"
+
+                            >
+
+                              <div className="flex justify-between items-start mb-3">
+
+                                <h5 className="font-semibold text-gray-800 text-sm leading-snug group-hover:text-emerald-700 transition-colors pr-2">
+
+                                  {ind.name}
+
+                                </h5>
+
+                                <span 
+
+                                  className="px-2.5 py-1 rounded text-xs font-bold text-white shadow-sm whitespace-nowrap"
+
+                                  style={{ backgroundColor: getPerformanceColor(ind.performance_percentage) }}
+
+                                >
+
+                                  {formatPct(ind.performance_percentage)}
+
+                                </span>
+
+                              </div>
+
+                              <div className="flex items-center justify-between text-xs text-gray-500 mt-2">
+
+                                <span>Target: <strong className="text-gray-700">{formatValue(ind.target)}</strong></span>
+
+                                <span>Act: <strong className="text-gray-700">{formatValue(ind.achieved)}</strong> {ind.unit}</span>
+
+                              </div>
+
+                              {!ind.is_aggregatable && (
+
+                                <div className="mt-2 text-[10px] text-orange-600 font-medium bg-orange-50 inline-block px-2 py-0.5 rounded">
+
+                                  Non-Aggregatable
+
+                                </div>
+
+                              )}
+
+                            </div>
+
+                          ))}
+
+                        </div>
+
+                      </div>
+
+                    ) : null;
+
+                  })()}
+
+                </div>
+
+              </section>
+
+            )}
+
+          </div>
+
+        )}
+
+      </div>
+
+
+
+      {/* 6. Indicator Detail Modal */}
+
+      {modalIndicatorId && (
+
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
+
+            
+
+            {/* Modal Header */}
+
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+
+              <h2 className="text-xl font-bold text-gray-900">Indicator Analysis</h2>
+
+              <button 
+
+                onClick={() => setModalIndicatorId(null)}
+
+                className="p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-200 rounded-full transition-colors"
+
+              >
+
+                <X className="w-6 h-6" />
+
+              </button>
+
+            </div>
+
+
+
+            {/* Modal Content */}
+
+            <div className="flex-1 overflow-y-auto p-6">
+
+              {modalLoading ? (
+
+                <div className="flex items-center justify-center h-64">
+
+                  <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-600"></div>
+
+                </div>
+
+              ) : modalData ? (
+
+                <div className="flex flex-col lg:flex-row gap-8">
+
+                  {/* Left Side - Basic Info */}
+
+                  <div className="w-full lg:w-1/3 space-y-6">
+
+                    <div>
+
+                      <h3 className="text-2xl font-bold text-gray-900 leading-tight mb-2">
+
+                        {modalData.indicator.name}
+
+                      </h3>
+
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-blue-50 text-blue-700 text-xs font-semibold uppercase tracking-wider mb-4">
+
+                        Unit: {modalData.indicator.unit || 'N/A'}
+
+                      </div>
+
+                    </div>
+
+                    
+
+                    <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
+
+                      <div className="flex items-center gap-2 mb-2 text-gray-700 font-semibold">
+
+                        <Info className="w-4 h-4 text-emerald-600" /> Description
+
+                      </div>
+
+                      <p className="text-sm text-gray-600 leading-relaxed">
+
+                        {modalData.indicator.description || 'No description available.'}
+
+                      </p>
+
+                    </div>
+
+
+
+                    <div className="bg-emerald-50/50 rounded-xl p-5 border border-emerald-100/50">
+
+                      <div className="flex items-center gap-2 mb-2 text-gray-700 font-semibold">
+
+                        <TrendingUp className="w-4 h-4 text-emerald-600" /> KPI Characteristics
+
+                      </div>
+
+                      <p className="text-sm text-gray-600">
+
+                        {modalData.indicator.kpi_characteristics || 'Increasing or decreasing over consecutive years based on target.'}
+
+                      </p>
+
+                    </div>
+
+                  </div>
+
+
+
+                  {/* Right Side - Visualization & Table */}
+
+                  <div className="w-full lg:w-2/3 flex flex-col">
+
+                    <div className="flex items-center justify-between mb-4">
+
+                      <h3 className="text-lg font-bold text-gray-900">Performance Trend</h3>
+
+                      <div className="flex bg-gray-100 rounded-lg p-1">
+
+                        <button
+
+                          onClick={() => setModalView('yearly')}
+
+                          className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+
+                            modalView === 'yearly' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+
+                          }`}
+
+                        >
+
+                          Yearly
+
+                        </button>
+
+                        <button
+
+                          onClick={() => setModalView('quarterly')}
+
+                          className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+
+                            modalView === 'quarterly' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+
+                          }`}
+
+                        >
+
+                          Quarterly
+
+                        </button>
+
+                      </div>
+
+                    </div>
+
+
+
+                    <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm mb-6">
+
+                      {renderModalChart()}
+
+                    </div>
+
+
+
+                    <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+
+                      <div className="overflow-x-auto">
+
+                        {renderModalTable()}
+
+                      </div>
+
+                    </div>
+
+                  </div>
+
+                </div>
+
+              ) : (
+
+                <div className="text-center text-gray-500 py-12">Failed to load data</div>
+
+              )}
+
+            </div>
+
+          </div>
+
+        </div>
+
+      )}
+
     </div>
+
   );
+
 }
+

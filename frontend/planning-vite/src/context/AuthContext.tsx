@@ -50,12 +50,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [token]);
 
-  const login = async (username: string, password: string) => {
+  const login = async (username: string, password: string): Promise<void> => {
     try {
       const res = await api.post('/api/auth/token/', { username, password });
       const tok = res.data?.token;
-      setToken(tok);
+      localStorage.setItem('auth_token', tok);
       localStorage.setItem('auth_username', username);
+      setToken(tok);
     } catch (error: any) {
       throw error;
     }

@@ -302,11 +302,34 @@ def get_group_performance_for_period(group, year: int, quarter_months: int = Non
     total = Decimal('0')
     has_data = False
     
-    # Get performance data for applicable indicators and quarters
+    # Separate incremental and non-incremental indicators
+    incremental_indicators = [ind for ind in direct_indicators if ind.is_incremental]
+    non_incremental_indicators = [ind for ind in direct_indicators if not ind.is_incremental]
+    
+    # For full year (no quarter_months), incremental indicators use Q4 only
+    if not quarter_months and incremental_indicators:
+        applicable_incremental = [
+            ind for ind in incremental_indicators
+            if ind.is_quarter_applicable(4)
+        ]
+        if applicable_incremental:
+            q4_total = QuarterlyPerformance.objects.filter(
+                plan__indicator__in=applicable_incremental,
+                plan__year=year,
+                quarter=4
+            ).aggregate(
+                total=Sum(Coalesce('value', Value(Decimal('0')), output_field=DecimalField()))
+            )['total'] or Decimal('0')
+            total += q4_total
+            has_data = True
+    
+    # Get performance data for non-incremental indicators (or all indicators if quarter_months is set)
+    indicators_for_quarterly = non_incremental_indicators if not quarter_months else list(direct_indicators)
+    
     for quarter in quarters_to_include:
         # Filter indicators where this quarter is applicable
         applicable_indicators = [
-            ind for ind in direct_indicators 
+            ind for ind in indicators_for_quarterly 
             if ind.is_quarter_applicable(quarter)
         ]
         

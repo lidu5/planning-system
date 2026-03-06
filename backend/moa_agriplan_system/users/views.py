@@ -368,7 +368,11 @@ class MinisterDashboardView(APIView):
                 if quarter_months_map[p.quarter] <= quarter_months
             ]
         else:
-            filtered_perfs = perfs_qs
+            # For full year: exclude Q1-Q3 for incremental indicators (Q4 already has cumulative)
+            filtered_perfs = [
+                p for p in perfs_qs
+                if not p.plan.indicator.is_incremental or p.quarter == 4
+            ]
         
         total_achieved = sum(float(p.value) for p in filtered_perfs if p.value is not None)
         
@@ -705,7 +709,7 @@ class IndicatorPerformanceView(APIView):
     permission_classes = [IsAuthenticated, IsIndicatorDashboardViewer]
 
     def get(self, request):
-        """Returns hierarchical indicator performance data organized by sector, indicator groups, and indicators."""
+        """Returns hierarchical indicator performance data organized by sector, departments, indicator groups, and indicators."""
         year = request.query_params.get('year')
         quarter_months = request.query_params.get('quarter_months')
         if year:
@@ -720,22 +724,19 @@ class IndicatorPerformanceView(APIView):
             except ValueError:
                 quarter_months = None
 
-        # If no year provided, use the most recent year with data
         if not year:
             latest_plan = AnnualPlan.objects.order_by('-year').first()
             if latest_plan:
                 year = latest_plan.year
             else:
-                return Response({'sectors': []})
+                return Response({'ministry_performance': None, 'sectors': []})
 
-        # Get all plans with related data
         plans_qs = AnnualPlan.objects.select_related(
             'indicator__department__sector'
         ).prefetch_related(
             'indicator__groups'
         ).filter(year=year)
 
-        # Get performances (only approved or higher)
         perfs_qs = QuarterlyPerformance.objects.select_related(
             'plan__indicator__department__sector'
         ).filter(
@@ -743,7 +744,6 @@ class IndicatorPerformanceView(APIView):
             status__in=[PerformanceStatus.APPROVED, PerformanceStatus.VALIDATED, PerformanceStatus.FINAL_APPROVED]
         )
 
-        # Get breakdowns for quarterly target calculations
         breakdowns_qs = QuarterlyBreakdown.objects.select_related(
             'plan__indicator__department__sector'
         ).filter(
@@ -751,176 +751,168 @@ class IndicatorPerformanceView(APIView):
             status__in=[PlanStatus.APPROVED, PlanStatus.VALIDATED, PlanStatus.FINAL_APPROVED]
         )
 
-        # Build sector structure
+        # Build data structure
         sectors_dict = {}
         
         for plan in plans_qs:
             sector = plan.indicator.department.sector
-            sector_id = sector.id
+            dept = plan.indicator.department
             
-            if sector_id not in sectors_dict:
-                sectors_dict[sector_id] = {
-                    'id': sector_id,
+            if sector.id not in sectors_dict:
+                sectors_dict[sector.id] = {
+                    'id': sector.id,
                     'name': sector.name,
-                    'indicators': {},
-                    'indicator_groups': {},
+                    'departments': {}
                 }
+                
+            if dept.id not in sectors_dict[sector.id]['departments']:
+                sectors_dict[sector.id]['departments'][dept.id] = {
+                    'id': dept.id,
+                    'name': dept.name,
+                    'indicators': [],
+                }
+                
+            indicator_perfs = perfs_qs.filter(plan_id=plan.id)
             
-            indicator = plan.indicator
-            indicator_id = indicator.id
-            plan_id = plan.id
-            
-            # Calculate indicator performance
-            indicator_perfs = perfs_qs.filter(plan_id=plan_id)
-            
-            # Filter performances based on quarter_months selection
             if quarter_months:
                 quarter_months_map = {1: 3, 2: 6, 3: 9, 4: 12}
-                filtered_perfs = [
-                    p for p in indicator_perfs 
-                    if quarter_months_map[p.quarter] <= quarter_months
-                ]
+                filtered_perfs = [p for p in indicator_perfs if quarter_months_map.get(p.quarter, 12) <= quarter_months]
             else:
-                filtered_perfs = indicator_perfs
-            
-            # Check if target is N/A (None, empty, or 'N/A')
+                # For full year: incremental indicators use Q4 only
+                if plan.indicator.is_incremental:
+                    filtered_perfs = [p for p in indicator_perfs if p.quarter == 4]
+                else:
+                    filtered_perfs = indicator_perfs
+                
             is_na_target = (plan.target is None or plan.target == '' or plan.target == 'N/A')
-            
-            # Calculate quarterly target based on breakdowns (only if not N/A)
+            target = 0
             if not is_na_target:
                 try:
                     target = float(plan.target)
                     if quarter_months:
-                        # Get quarterly breakdown for this plan
                         try:
-                            breakdown = breakdowns_qs.get(plan_id=plan_id)
-                            quarterly_target = 0
-                            if quarter_months == 3:
-                                quarterly_target = float(breakdown.q1 or 0)
-                            elif quarter_months == 6:
-                                quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0)
-                            elif quarter_months == 9:
-                                quarterly_target = float(breakdown.q1 or 0) + float(breakdown.q2 or 0) + float(breakdown.q3 or 0)
-                            target = quarterly_target
+                            breakdown = breakdowns_qs.get(plan_id=plan.id)
+                            qt = 0
+                            if quarter_months >= 3: qt += float(breakdown.q1 or 0)
+                            if quarter_months >= 6: qt += float(breakdown.q2 or 0)
+                            if quarter_months >= 9: qt += float(breakdown.q3 or 0)
+                            if quarter_months >= 12: qt += float(breakdown.q4 or 0)
+                            target = qt
                         except QuarterlyBreakdown.DoesNotExist:
-                            # Fallback to proportional if no breakdown exists
                             target = (target * quarter_months) / 12
                 except (ValueError, TypeError):
                     is_na_target = True
                     target = 0
-            else:
-                target = 0
+                    
+            all_performances_na = all(p.value is None or p.value == '' or str(p.value).upper() == 'N/A' for p in filtered_perfs)
+            total_achieved = sum(float(p.value) for p in filtered_perfs if p.value is not None and p.value != '' and str(p.value).upper() != 'N/A')
             
-            # Check if all performances are N/A
-            all_performances_na = all(p.value is None or p.value == '' or p.value == 'N/A' for p in filtered_perfs)
-            
-            # Calculate total achieved (exclude N/A values)
-            total_achieved = sum(float(p.value) for p in filtered_perfs if p.value is not None and p.value != '' and p.value != 'N/A')
-            
-            # Calculate performance percentage
-            if is_na_target or all_performances_na:
-                # If target is N/A or all performances are N/A, set performance to None
+            if is_na_target or all_performances_na or target <= 0:
                 performance_pct = None
-            elif target > 0:
+            else:
                 performance_pct = (total_achieved / target) * 100
-            else:
-                performance_pct = None
-            
-            # Get indicator groups
-            groups = indicator.groups.all()
+                if performance_pct > 100:
+                    performance_pct = 100.0
+                    
+            groups = plan.indicator.groups.all()
             group_id = groups.first().id if groups.exists() else None
             group_name = groups.first().name if groups.exists() else None
             
-            # Store indicator data
-            indicator_data = {
-                'id': indicator_id,
-                'plan_id': plan_id,
-                'name': indicator.name,
-                'unit': indicator.unit or '',
-                'description': indicator.description or '',
-                'department_name': plan.indicator.department.name,
+            sectors_dict[sector.id]['departments'][dept.id]['indicators'].append({
+                'id': plan.indicator.id,
+                'plan_id': plan.id,
+                'name': plan.indicator.name,
+                'unit': plan.indicator.unit,
+                'description': plan.indicator.description,
+                'is_aggregatable': plan.indicator.is_aggregatable,
                 'target': 0 if is_na_target else target,
                 'achieved': 0 if all_performances_na else total_achieved,
                 'performance_percentage': performance_pct,
                 'group_id': group_id,
-                'group_name': group_name,
-            }
-            
-            sectors_dict[sector_id]['indicators'][indicator_id] = indicator_data
-            
-            # Organize by indicator groups
-            if group_id:
-                if group_id not in sectors_dict[sector_id]['indicator_groups']:
-                    sectors_dict[sector_id]['indicator_groups'][group_id] = {
-                        'id': group_id,
-                        'name': group_name,
-                        'indicators': [],
-                    }
-                sectors_dict[sector_id]['indicator_groups'][group_id]['indicators'].append(indicator_data)
-        
-        # Calculate sector and group performance percentages
-        sectors_list = []
-        for sector_id, sector_data in sectors_dict.items():
-            # Calculate sector performance via departments (average of department averages)
-            # Group indicators by department
-            dept_indicators = {}
-            for ind in sector_data['indicators'].values():
-                dept_name = ind.get('department_name', 'Unknown')
-                if dept_name not in dept_indicators:
-                    dept_indicators[dept_name] = []
-                if ind['performance_percentage'] is not None:
-                    dept_indicators[dept_name].append(ind['performance_percentage'])
-            
-            # Calculate each department's average percentage
-            dept_averages = []
-            for dept_name, pcts in dept_indicators.items():
-                if pcts:
-                    dept_averages.append(sum(pcts) / len(pcts))
-            
-            # Sector performance = average of department percentages
-            if dept_averages:
-                sector_performance = sum(dept_averages) / len(dept_averages)
-            else:
-                sector_performance = None
-            
-            # Calculate group performances
-            groups_list = []
-            for group_id, group_data in sector_data['indicator_groups'].items():
-                group_percentages = [
-                    ind['performance_percentage']
-                    for ind in group_data['indicators']
-                    if ind['performance_percentage'] is not None
-                ]
-                
-                if group_percentages:
-                    group_performance = sum(group_percentages) / len(group_percentages)
-                else:
-                    group_performance = None
-                
-                groups_list.append({
-                    'id': group_data['id'],
-                    'name': group_data['name'],
-                    'performance_percentage': group_performance,
-                    'indicators': group_data['indicators'],
-                })
-            
-            # Add indicators without groups
-            ungrouped_indicators = [
-                ind for ind in sector_data['indicators'].values()
-                if ind['group_id'] is None
-            ]
-            
-            sectors_list.append({
-                'id': sector_data['id'],
-                'name': sector_data['name'],
-                'performance_percentage': sector_performance,
-                'indicator_groups': groups_list,
-                'ungrouped_indicators': ungrouped_indicators,
+                'group_name': group_name
             })
+
+        # Calculate percentages
+        sectors_result = []
+        for s_id, s_data in sectors_dict.items():
+            depts_result = []
+            for d_id, d_data in s_data['departments'].items():
+                
+                # Department percent: average of all aggregatable indicators
+                agg_ind_pcts = [
+                    ind['performance_percentage'] 
+                    for ind in d_data['indicators'] 
+                    if ind.get('is_aggregatable', True) and ind['performance_percentage'] is not None
+                ]
+                dept_perf = sum(agg_ind_pcts) / len(agg_ind_pcts) if agg_ind_pcts else None
+                
+                # Group indicators by group
+                groups_dict = {}
+                ungrouped = []
+                for ind in d_data['indicators']:
+                    if ind['group_id']:
+                        if ind['group_id'] not in groups_dict:
+                            groups_dict[ind['group_id']] = {
+                                'id': ind['group_id'],
+                                'name': ind['group_name'],
+                                'indicators': []
+                            }
+                        groups_dict[ind['group_id']]['indicators'].append(ind)
+                    else:
+                        ungrouped.append(ind)
+                        
+                groups_result = []
+                for g_id, g_data in groups_dict.items():
+                    # Group percent: average of aggregatable indicators only
+                    g_agg_pcts = [
+                        ind['performance_percentage']
+                        for ind in g_data['indicators']
+                        if ind.get('is_aggregatable', True) and ind['performance_percentage'] is not None
+                    ]
+                    g_perf = sum(g_agg_pcts) / len(g_agg_pcts) if g_agg_pcts else None
+                    groups_result.append({
+                        'id': g_data['id'],
+                        'name': g_data['name'],
+                        'performance_percentage': g_perf,
+                        'indicators': g_data['indicators']
+                    })
+                
+                depts_result.append({
+                    'id': d_data['id'],
+                    'name': d_data['name'],
+                    'performance_percentage': dept_perf,
+                    'groups': groups_result,
+                    'ungrouped_indicators': ungrouped
+                })
+                
+            # Sector percent: average of departments
+            dept_pcts = [
+                d['performance_percentage']
+                for d in depts_result
+                if d['performance_percentage'] is not None
+            ]
+            sector_perf = sum(dept_pcts) / len(dept_pcts) if dept_pcts else None
+            
+            sectors_result.append({
+                'id': s_data['id'],
+                'name': s_data['name'],
+                'performance_percentage': sector_perf,
+                'departments': depts_result
+            })
+            
+        # Ministry percent: average of sectors
+        sector_pcts = [
+            s['performance_percentage']
+            for s in sectors_result
+            if s['performance_percentage'] is not None
+        ]
+        ministry_perf = sum(sector_pcts) / len(sector_pcts) if sector_pcts else None
         
         return Response({
             'year': year,
-            'sectors': sectors_list,
+            'quarter_months': quarter_months,
+            'ministry_performance': ministry_perf,
+            'sectors': sectors_result
         })
 
 
@@ -932,26 +924,18 @@ class IndicatorDetailView(APIView):
         indicator_id = request.query_params.get('indicator_id')
         if not indicator_id:
             return Response({'error': 'indicator_id is required'}, status=400)
-        
+
         try:
             indicator_id = int(indicator_id)
         except ValueError:
             return Response({'error': 'invalid indicator_id'}, status=400)
 
-        # Get current year for quarterly view
         current_year = request.query_params.get('year')
-        quarter_months = request.query_params.get('quarter_months')
         if current_year:
             try:
                 current_year = int(current_year)
             except ValueError:
                 current_year = None
-        
-        if quarter_months:
-            try:
-                quarter_months = int(quarter_months)
-            except ValueError:
-                quarter_months = None
 
         if not current_year:
             latest_plan = AnnualPlan.objects.filter(indicator_id=indicator_id).order_by('-year').first()
@@ -961,112 +945,95 @@ class IndicatorDetailView(APIView):
                 return Response({
                     'indicator': None,
                     'yearly_data': [],
-                    'quarterly_data': [],
+                    'current_year_quarters': [],
+                    'last_year_quarters': []
                 })
 
-        # Get indicator info
         try:
             indicator = Indicator.objects.select_related('department', 'department__sector').get(id=indicator_id)
         except Indicator.DoesNotExist:
             return Response({'error': 'indicator not found'}, status=404)
 
-        # Get yearly data (5 consecutive years)
-        years_list = []
-        if current_year:
-            years_list = list(range(current_year - 4, current_year + 1))
-        else:
-            years_list = []
-
+        # Get yearly data (4 consecutive years ending in current_year)
+        years_list = list(range(current_year - 3, current_year + 1))
         yearly_data = []
         for y in years_list:
             try:
                 plan = AnnualPlan.objects.get(indicator_id=indicator_id, year=y)
-                target = float(plan.target)
-                
-                # Get all performances for this plan
+                target = float(plan.target) if plan.target and str(plan.target).upper() != 'N/A' else 0
+
                 perfs = QuarterlyPerformance.objects.filter(
                     plan_id=plan.id,
                     status__in=[PerformanceStatus.APPROVED, PerformanceStatus.VALIDATED, PerformanceStatus.FINAL_APPROVED]
                 )
-                achieved = sum(float(p.value) for p in perfs if p.value is not None)
-                
+                # For incremental indicators, full-year performance = Q4 value only
+                if indicator.is_incremental:
+                    q4_perf = perfs.filter(quarter=4).first()
+                    achieved = float(q4_perf.value) if q4_perf and q4_perf.value is not None and str(q4_perf.value).upper() != 'N/A' else 0
+                else:
+                    achieved = sum(float(p.value) for p in perfs if p.value is not None and str(p.value).upper() != 'N/A')
+                pct = (achieved / target * 100) if target > 0 else None
+                if pct is not None and pct > 100: pct = 100.0
+
                 yearly_data.append({
                     'year': y,
                     'target': target,
                     'achieved': achieved,
+                    'percentage': pct
                 })
             except AnnualPlan.DoesNotExist:
                 yearly_data.append({
                     'year': y,
                     'target': 0,
                     'achieved': 0,
+                    'percentage': None
                 })
 
-        # Get quarterly data for current year
-        quarterly_data = []
-        try:
-            plan = AnnualPlan.objects.get(indicator_id=indicator_id, year=current_year)
-            
-            # Get breakdown
+        def get_quarters_for_year(y):
+            data = []
             try:
-                breakdown = QuarterlyBreakdown.objects.get(plan_id=plan.id)
-            except QuarterlyBreakdown.DoesNotExist:
-                breakdown = None
-            
-            # Get performances
-            perfs = QuarterlyPerformance.objects.filter(
-                plan_id=plan.id,
-                status__in=[PerformanceStatus.APPROVED, PerformanceStatus.VALIDATED, PerformanceStatus.FINAL_APPROVED]
-            )
-            
-            # Determine which quarters to include based on quarter_months
-            quarters_to_include = [1, 2, 3, 4]
-            if quarter_months:
-                quarter_months_map = {1: 3, 2: 6, 3: 9, 4: 12}
-                quarters_to_include = [
-                    q for q in [1, 2, 3, 4] 
-                    if quarter_months_map[q] <= quarter_months
-                ]
-            
-            for q in quarters_to_include:
-                if breakdown:
-                    if q == 1:
-                        q_target = float(breakdown.q1 or 0)
-                    elif q == 2:
-                        q_target = float(breakdown.q2 or 0)
-                    elif q == 3:
-                        q_target = float(breakdown.q3 or 0)
+                plan = AnnualPlan.objects.get(indicator_id=indicator_id, year=y)
+                try:
+                    breakdown = QuarterlyBreakdown.objects.get(plan_id=plan.id)
+                except QuarterlyBreakdown.DoesNotExist:
+                    breakdown = None
+
+                perfs = QuarterlyPerformance.objects.filter(
+                    plan_id=plan.id,
+                    status__in=[PerformanceStatus.APPROVED, PerformanceStatus.VALIDATED, PerformanceStatus.FINAL_APPROVED]
+                )
+
+                for q in [1, 2, 3, 4]:
+                    if breakdown:
+                        if q == 1: q_target = float(breakdown.q1 or 0)
+                        elif q == 2: q_target = float(breakdown.q2 or 0)
+                        elif q == 3: q_target = float(breakdown.q3 or 0)
+                        else: q_target = float(breakdown.q4 or 0)
                     else:
-                        q_target = float(breakdown.q4 or 0)
-                else:
-                    q_target = 0
-                
-                q_perf = perfs.filter(quarter=q).first()
-                q_achieved = float(q_perf.value) if q_perf and q_perf.value is not None else 0
-                
-                # Calculate performance percentage
-                q_percentage = None
-                variance_description = None
-                if q_target > 0 and q_perf:
-                    q_percentage = (q_achieved / q_target) * 100
-                    # Include variance_description if performance is < 84% or > 110%
-                    if q_percentage < 84 or q_percentage > 110:
-                        variance_description = q_perf.variance_description or None
-                
-                quarterly_data.append({
-                    'quarter': f'Q{q}',
-                    'target': q_target,
-                    'achieved': q_achieved,
-                    'percentage': q_percentage,
-                    'variance_description': variance_description,
-                })
-        except AnnualPlan.DoesNotExist:
-            quarterly_data = [
-                {'quarter': 'Q1', 'target': 0, 'achieved': 0},
-                {'quarter': 'Q2', 'target': 0, 'achieved': 0},
-                {'quarter': 'Q3', 'target': 0, 'achieved': 0},
-                {'quarter': 'Q4', 'target': 0, 'achieved': 0},
-            ]
+                        target_val = float(plan.target) if plan.target and str(plan.target).upper() != 'N/A' else 0
+                        q_target = target_val / 4
+
+                    q_perf = perfs.filter(quarter=q).first()
+                    q_achieved = float(q_perf.value) if q_perf and q_perf.value is not None and str(q_perf.value).upper() != 'N/A' else None
+                    
+                    q_percentage = None
+                    if q_target > 0 and q_achieved is not None:
+                        q_percentage = (q_achieved / q_target) * 100
+                        if q_percentage > 100: q_percentage = 100.0
+
+                    data.append({
+                        'quarter': q,
+                        'target': q_target,
+                        'achieved': q_achieved,
+                        'percentage': q_percentage
+                    })
+            except AnnualPlan.DoesNotExist:
+                for q in [1, 2, 3, 4]:
+                    data.append({'quarter': q, 'target': 0, 'achieved': None, 'percentage': None})
+            return data
+
+        current_year_quarters = get_quarters_for_year(current_year)
+        last_year_quarters = get_quarters_for_year(current_year - 1)
 
         return Response({
             'indicator': {
@@ -1075,7 +1042,9 @@ class IndicatorDetailView(APIView):
                 'unit': indicator.unit or '',
                 'description': indicator.description or '',
                 'department_name': indicator.department.name,
+                'kpi_characteristics': getattr(indicator, 'kpi_characteristics', '')
             },
             'yearly_data': yearly_data,
-            'quarterly_data': quarterly_data,
+            'current_year_quarters': current_year_quarters,
+            'last_year_quarters': last_year_quarters,
         })

@@ -20,6 +20,7 @@ export default function Login() {
 
     try {
       await login(username, password);
+      // Redirect to root, App.tsx will handle role-based redirect
       window.location.href = '/';
     } catch (err: any) {
       const msg = err?.userMessage || getErrorMessage(err, 'Login failed');

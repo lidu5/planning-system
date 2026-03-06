@@ -257,9 +257,14 @@ def state_minister_dashboard(request):
                 quarterly_target = (float(annual_plan.target) * quarter_months) / 12
             target = quarterly_target
         else:
-            performance = QuarterlyPerformance.objects.filter(plan=annual_plan).aggregate(
-                total=Sum('value')
-            )['total'] or 0
+            # For incremental indicators, full-year performance = Q4 value only
+            if indicator.is_incremental:
+                q4_perf = QuarterlyPerformance.objects.filter(plan=annual_plan, quarter=4).first()
+                performance = float(q4_perf.value) if q4_perf and q4_perf.value is not None else 0
+            else:
+                performance = QuarterlyPerformance.objects.filter(plan=annual_plan).aggregate(
+                    total=Sum('value')
+                )['total'] or 0
             target = float(annual_plan.target) if annual_plan.target else 0
         
         if target > 0:
@@ -336,9 +341,14 @@ def state_minister_dashboard(request):
                         target = quarterly_target
                     else:
                         # Get all quarters performance
-                        performance = QuarterlyPerformance.objects.filter(plan=annual_plan).aggregate(
-                            total=Sum('value')
-                        )['total'] or 0
+                        # For incremental indicators, full-year performance = Q4 value only
+                        if indicator.is_incremental:
+                            q4_perf = QuarterlyPerformance.objects.filter(plan=annual_plan, quarter=4).first()
+                            performance = float(q4_perf.value) if q4_perf and q4_perf.value is not None else 0
+                        else:
+                            performance = QuarterlyPerformance.objects.filter(plan=annual_plan).aggregate(
+                                total=Sum('value')
+                            )['total'] or 0
                         target = annual_plan.target
                     
                     indicators_data.append({
@@ -406,9 +416,14 @@ def state_minister_dashboard(request):
                 target = quarterly_target
             else:
                 # Get all quarters performance
-                performance = QuarterlyPerformance.objects.filter(plan=annual_plan).aggregate(
-                    total=Sum('value')
-                )['total'] or 0
+                # For incremental indicators, full-year performance = Q4 value only
+                if indicator.is_incremental:
+                    q4_perf = QuarterlyPerformance.objects.filter(plan=annual_plan, quarter=4).first()
+                    performance = float(q4_perf.value) if q4_perf and q4_perf.value is not None else 0
+                else:
+                    performance = QuarterlyPerformance.objects.filter(plan=annual_plan).aggregate(
+                        total=Sum('value')
+                    )['total'] or 0
                 target = annual_plan.target
             
             ungrouped_data.append({
