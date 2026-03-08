@@ -170,10 +170,12 @@ CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'http://10.10.20.233:3000',      # LAN frontend
-    'http://10.10.20.233:8080',      # 👈 ADD THIS - LAN frontend on port 8080
-    'http://196.188.248.104:8080', 
-     'http://localhost:5173', # 👈 ADD THIS - Public frontend
-     'http://localhost:5174',
+    'http://10.10.20.233:8080',      # LAN frontend on port 8080
+    'http://196.188.248.104:8080',   # Public frontend on port 8080 (old)
+    'http://196.188.248.104',        # Public frontend on port 80 (new)
+    'http://pms.moa.gov.et',         # Domain frontend on port 80
+    'http://localhost:5173',         # Local development frontend
+    'http://localhost:5174',         # Local development frontend
 ]
 
 # 👇 UPDATED: CSRF trusted origins
@@ -181,12 +183,14 @@ CSRF_TRUSTED_ORIGINS = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
     'http://10.10.20.233:3000',
-    'http://10.10.20.233:8080',      # 👈 ADD THIS
-    'http://10.10.20.233:8000',      # 👈 ADD THIS - LAN backend
-    'http://196.188.248.104:8080',   # 👈 ADD THIS - Public frontend
-    'http://196.188.248.104:8000', 
-     'http://localhost:5173',  # 👈 ADD THIS - Public backend
-     'http://localhost:5174',
+    'http://10.10.20.233:8080',      # LAN frontend
+    'http://10.10.20.233:8000',      # LAN backend
+    'http://196.188.248.104:8080',   # Public frontend on port 8080 (old)
+    'http://196.188.248.104:8000',   # Public backend
+    'http://196.188.248.104',        # Public frontend on port 80 (new)
+    'http://pms.moa.gov.et',         # Domain frontend on port 80
+    'http://localhost:5173',         # Local development frontend
+    'http://localhost:5174',         # Local development frontend
 ]
 
 # Quarterly breakdown submission window (configurable via .env)
