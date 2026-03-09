@@ -57,6 +57,8 @@ import AdvisorCommentsView from './pages/AdvisorCommentsView'
 
 import OverallDashboard from './pages/OverallDashboard'
 
+import DetailAnalysis from './pages/DetailAnalysis'
+
 import { useAuth } from './context/AuthContext'
 
 
@@ -540,6 +542,22 @@ function App() {
             </DashboardLayout>
 
           </ProtectedRoute>
+
+        }
+
+      />
+
+      <Route
+
+        path="/detail-analysis"
+
+        element={
+
+          <MinisterRoute>
+
+            <DetailAnalysis />
+
+          </MinisterRoute>
 
         }
 

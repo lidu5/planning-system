@@ -426,6 +426,30 @@ const MenuIcon = ({ name, active }: { name: string; active?: boolean }) => {
 
 
 
+    case 'Detail Analysis':
+
+
+
+      return (
+
+
+
+        <svg className={`w-[22px] h-[22px] ${color}`} fill="currentColor" viewBox="0 0 24 24">
+
+
+
+          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
+
+
+
+        </svg>
+
+
+
+      );
+
+
+
     default:
 
 
@@ -878,7 +902,12 @@ export default function DashboardLayout({ children }: PropsWithChildren) {
 
       { label: 'Dashboard', to: '/minister-view' },
 
+
       { label: 'Overall Dashboard', to: '/overall-dashboard' },
+
+
+      { label: 'Detail Analysis', to: '/detail-analysis' },
+
 
     ];
 
