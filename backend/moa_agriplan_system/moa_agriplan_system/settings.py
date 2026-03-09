@@ -173,7 +173,8 @@ CORS_ALLOWED_ORIGINS = [
     'http://10.10.20.233:8080',      # LAN frontend on port 8080
     'http://196.188.248.104:8080',   # Public frontend on port 8080 (old)
     'http://196.188.248.104',        # Public frontend on port 80 (new)
-    'http://pms.moa.gov.et',         # Domain frontend on port 80
+    'http://pms.moa.gov.et',
+    'https://pms.moa.gov.et',         # Domain frontend on port 80
     'http://localhost:5173',         # Local development frontend
     'http://localhost:5174',         # Local development frontend
 ]
@@ -188,7 +189,8 @@ CSRF_TRUSTED_ORIGINS = [
     'http://196.188.248.104:8080',   # Public frontend on port 8080 (old)
     'http://196.188.248.104:8000',   # Public backend
     'http://196.188.248.104',        # Public frontend on port 80 (new)
-    'http://pms.moa.gov.et',         # Domain frontend on port 80
+    'http://pms.moa.gov.et',
+    'https://pms.moa.gov.et',         # Domain frontend on port 80
     'http://localhost:5173',         # Local development frontend
     'http://localhost:5174',         # Local development frontend
 ]
