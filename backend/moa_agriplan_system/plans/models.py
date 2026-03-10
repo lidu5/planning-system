@@ -216,17 +216,17 @@ def within_quarter_submission_window(date: timezone.datetime, quarter: int) -> b
     # Determine fiscal year start (FY starts July 1x; we anchor to July of the FY)
     fy_start_year = date.year if date.month >= 7 else date.year - 1
     if quarter == 1:
-        start = timezone.datetime(year=fy_start_year, month=7, day=8, tzinfo=tz)
-        end = timezone.datetime(year=fy_start_year, month=10, day=10, tzinfo=tz)
+        start = timezone.datetime(year=fy_start_year, month=10, day=5, tzinfo=tz)
+        end = timezone.datetime(year=fy_start_year, month=10, day=14, tzinfo=tz)
     elif quarter == 2:
-        start = timezone.datetime(year=fy_start_year, month=10, day=11, tzinfo=tz)
-        end = timezone.datetime(year=fy_start_year + 1, month=1, day=8, tzinfo=tz)
+        start = timezone.datetime(year=fy_start_year + 1, month=1, day=3, tzinfo=tz)
+        end = timezone.datetime(year=fy_start_year + 1, month=1, day=12, tzinfo=tz)
     elif quarter == 3:
-        start = timezone.datetime(year=fy_start_year + 1, month=4, day=4, tzinfo=tz)
-        end = timezone.datetime(year=fy_start_year + 1, month=4, day=13, tzinfo=tz)
+        start = timezone.datetime(year=fy_start_year + 1, month=4, day=3, tzinfo=tz)
+        end = timezone.datetime(year=fy_start_year + 1, month=4, day=12, tzinfo=tz)
     else:
-        start = timezone.datetime(year=fy_start_year + 1, month=4, day=9, tzinfo=tz)
-        end = timezone.datetime(year=fy_start_year + 1, month=7, day=7, tzinfo=tz)
+        start = timezone.datetime(year=fy_start_year + 1, month=7, day=2, tzinfo=tz)
+        end = timezone.datetime(year=fy_start_year + 1, month=7, day=11, tzinfo=tz)
     # Q3 has specific end date without extension
     if quarter == 3:
         return start <= date <= end
