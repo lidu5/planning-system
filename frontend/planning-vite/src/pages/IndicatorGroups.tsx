@@ -32,6 +32,7 @@ export default function IndicatorGroups() {
   const [formSectorId, setFormSectorId] = useState<number | ''>('');
   const [name, setName] = useState('');
   const [unit, setUnit] = useState('');
+  const [isLabel, setIsLabel] = useState(false);
   const [parentId, setParentId] = useState<number | null>(null);
   const [editing, setEditing] = useState<IndicatorGroup | null>(null);
   const [loading, setLoading] = useState(false);
@@ -171,6 +172,7 @@ export default function IndicatorGroups() {
       const payload: any = { 
         name, 
         unit: unit || undefined,
+        is_label: isLabel,
         parent_id: parentId || null
       };
       
@@ -189,6 +191,7 @@ export default function IndicatorGroups() {
       }
       setName('');
       setUnit('');
+      setIsLabel(false);
       setParentId(null);
       setDepartmentId('');
       setSectorId('');
@@ -206,6 +209,7 @@ export default function IndicatorGroups() {
     setEditing(g);
     setName(g.name);
     setUnit(g.unit || '');
+    setIsLabel(g.is_label || false);
     setParentId(g.parent_id || null);
     if (g.department) {
       setAssociationType('department');
@@ -241,6 +245,7 @@ export default function IndicatorGroups() {
     setEditing(null);
     setName('');
     setUnit('');
+    setIsLabel(false);
     setParentId(null);
     setDepartmentId('');
     setSectorId('');
@@ -732,6 +737,27 @@ export default function IndicatorGroups() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="flex items-center gap-3 text-sm font-medium text-gray-700 mb-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isLabel}
+                      onChange={(e) => setIsLabel(e.target.checked)}
+                      className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500 focus:ring-2"
+                    />
+                    <span className="flex items-center gap-2">
+                      <Layers className="inline w-4 h-4" />
+                      Is Label
+                    </span>
+                  </label>
+                  <p className="text-xs text-gray-500 mt-1 ml-7">Whether this indicator group is a label</p>
+                </div>
+                <div>
+                  {/* Empty div for grid alignment */}
+                </div>
+              </div>
+
               {error && (
                 <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
                   <div className="flex items-center gap-2">
@@ -843,6 +869,12 @@ export default function IndicatorGroups() {
                             <p className="font-medium text-gray-900">{g.name}</p>
                             {g.unit && <p className="text-xs text-gray-500">Unit: {g.unit}</p>}
                             {g.parent && <p className="text-xs text-gray-500">Parent: {g.parent.name}</p>}
+                            {g.is_label && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-100 text-purple-800 text-xs rounded-full mt-1">
+                                <Layers className="w-3 h-3" />
+                                Label
+                              </span>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -927,6 +959,12 @@ export default function IndicatorGroups() {
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                               ID: {g.id}
                             </span>
+                            {g.is_label && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-100 text-purple-800 text-xs rounded-full">
+                                <Layers className="w-3 h-3" />
+                                Label
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
