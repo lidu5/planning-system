@@ -26,6 +26,10 @@ class IndicatorGroup(models.Model):
     sector = models.ForeignKey(StateMinisterSector, on_delete=models.CASCADE, null=True, blank=True, related_name='sector_indicator_groups')
     parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='children')
     unit = models.CharField(max_length=64, blank=True, help_text="Unit of measurement for this group and its indicators")
+    is_label = models.BooleanField(
+        default=False,
+        help_text="Whether this indicator group is a label"
+    )
 
     class Meta:
         constraints = [

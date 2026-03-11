@@ -74,8 +74,8 @@ def get_group_quarterly_breakdown_aggregate(group, year: int) -> Dict[str, Optio
     # Get all direct child indicators that are aggregatable
     direct_indicators = group.indicators.filter(is_aggregatable=True)
     
-    # Get all child groups for recursive aggregation
-    child_groups = group.children.all()
+    # Get all child groups for recursive aggregation (only non-label groups)
+    child_groups = group.children.filter(is_label=False)
     
     # Start with empty result
     result = {'q1': None, 'q2': None, 'q3': None, 'q4': None}
@@ -161,8 +161,8 @@ def get_group_performance_aggregate(group, year: int, quarter: int) -> Optional[
     ]
     
     if not applicable_indicators:
-        # Check child groups
-        child_groups = group.children.all()
+        # Check child groups (only non-label groups)
+        child_groups = group.children.filter(is_label=False)
         child_sum = Decimal('0')
         has_applicable_children = False
         
@@ -183,8 +183,8 @@ def get_group_performance_aggregate(group, year: int, quarter: int) -> Optional[
         total=Sum(Coalesce('value', Value(Decimal('0')), output_field=DecimalField()))
     )['total'] or Decimal('0')
     
-    # Add child group aggregates
-    child_groups = group.children.all()
+    # Add child group aggregates (only from non-label groups)
+    child_groups = group.children.filter(is_label=False)
     for child_group in child_groups:
         child_result = get_group_performance_aggregate(child_group, year, quarter)
         if child_result is not None:
@@ -210,8 +210,8 @@ def get_group_quarterly_target_aggregate(group, year: int, quarter_months: int =
     # Get all direct child indicators that are aggregatable
     direct_indicators = group.indicators.filter(is_aggregatable=True)
     
-    # Get all child groups for recursive aggregation
-    child_groups = group.children.all()
+    # Get all child groups for recursive aggregation (only non-label groups)
+    child_groups = group.children.filter(is_label=False)
     
     # Start with empty result
     result = {'q1': None, 'q2': None, 'q3': None, 'q4': None}
@@ -345,8 +345,8 @@ def get_group_performance_for_period(group, year: int, quarter_months: int = Non
             total += quarter_total
             has_data = True
     
-    # Add child group aggregates
-    child_groups = group.children.all()
+    # Add child group aggregates (only from non-label groups)
+    child_groups = group.children.filter(is_label=False)
     for child_group in child_groups:
         child_result = get_group_performance_for_period(child_group, year, quarter_months)
         if child_result is not None:

@@ -210,6 +210,7 @@ def state_minister_dashboard(request):
         return Response({'detail': 'No sector found for user'}, status=status.HTTP_400_BAD_REQUEST)
     
     # Get root indicator groups for this sector (groups with no parent)
+    # Include label groups for structure but they won't be calculated
     root_groups = IndicatorGroup.objects.filter(
         Q(department__sector_id=sector_id) | Q(sector_id=sector_id),
         parent__isnull=True
@@ -276,8 +277,18 @@ def state_minister_dashboard(request):
         """
         Calculate group performance as the average of:
         - Direct indicator percentages (is_aggregatable=True only)
-        - Child group percentages (recursively)
+        - Child group percentages (recursively, but only from non-label groups)
+        
+        Label groups (is_label=True) are excluded from performance calculations.
         """
+        # Skip label groups entirely - they don't have performance percentages
+        if group.is_label:
+            return {
+                'performance_percentage': None,
+                'total_components': 0,
+                'is_label': True
+            }
+        
         percentages = []
         
         # Collect direct indicator percentages (only aggregatable)
@@ -286,9 +297,12 @@ def state_minister_dashboard(request):
             if pct is not None:
                 percentages.append(pct)
         
-        # Collect child group percentages
+        # Collect child group percentages (only from non-label children)
         if children_data:
             for child in children_data:
+                # Skip child groups that are label groups
+                if child.get('is_label'):
+                    continue
                 if child.get('performance_percentage') is not None:
                     percentages.append(child['performance_percentage'])
         
@@ -297,6 +311,7 @@ def state_minister_dashboard(request):
         return {
             'performance_percentage': performance_percentage,
             'total_components': len(percentages),
+            'is_label': group.is_label
         }
     
     # Helper function to build group tree with performance (bottom-up)
@@ -449,11 +464,18 @@ def state_minister_dashboard(request):
     
     total_indicators = len(all_indicators)
     
-    # Count groups on track vs lagging
+    # Count groups on track vs lagging (excluding label groups)
     def count_group_performance(groups):
         on_track = 0
         lagging = 0
         for group in groups:
+            # Skip label groups - they don't have performance metrics
+            if group.get('is_label'):
+                child_on_track, child_lagging = count_group_performance(group['children'])
+                on_track += child_on_track
+                lagging += child_lagging
+                continue
+                
             if group.get('performance_percentage') is not None:
                 if group['performance_percentage'] >= 85:
                     on_track += 1

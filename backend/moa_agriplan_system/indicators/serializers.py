@@ -45,7 +45,7 @@ class IndicatorGroupSerializer(serializers.ModelSerializer):
         model = IndicatorGroup
         fields = [
             'id', 'name', 'department', 'department_id', 'sector', 'sector_id',
-            'parent', 'parent_id', 'unit', 'children', 'level', 'hierarchy_path', 
+            'parent', 'parent_id', 'unit', 'is_label', 'children', 'level', 'hierarchy_path', 
             'is_parent', 'inherited_unit', 'annual_target_aggregate', 
             'quarterly_breakdown_aggregate', 'performance_aggregate'
         ]
