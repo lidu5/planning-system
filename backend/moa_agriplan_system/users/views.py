@@ -864,17 +864,31 @@ class IndicatorPerformanceView(APIView):
                 groups_result = []
                 for g_id, g_data in groups_dict.items():
                     # Group percent: average of aggregatable indicators only
+                    # Skip label groups - they don't participate in calculations
                     g_agg_pcts = [
                         ind['performance_percentage']
                         for ind in g_data['indicators']
                         if ind.get('is_aggregatable', True) and ind['performance_percentage'] is not None
                     ]
                     g_perf = sum(g_agg_pcts) / len(g_agg_pcts) if g_agg_pcts else None
+                    
+                    # Check if this is a label group by querying the database
+                    try:
+                        group_obj = IndicatorGroup.objects.get(id=g_id)
+                        is_label_group = group_obj.is_label
+                    except IndicatorGroup.DoesNotExist:
+                        is_label_group = False
+                    
+                    # Label groups get None performance percentage
+                    if is_label_group:
+                        g_perf = None
+                    
                     groups_result.append({
                         'id': g_data['id'],
                         'name': g_data['name'],
                         'performance_percentage': g_perf,
-                        'indicators': g_data['indicators']
+                        'indicators': g_data['indicators'],
+                        'is_label': is_label_group
                     })
                 
                 depts_result.append({
