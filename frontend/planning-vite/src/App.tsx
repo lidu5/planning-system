@@ -45,7 +45,7 @@ import FinalApprovals from './pages/FinalApprovals'
 
 import MinisterView from './pages/MinisterView'
 
-import StateMinisterDashboard from './pages/StateMinisterDashboard'
+import StateMinisterView from './pages/StateMinisterView'
 
 import ActivityLogs from './pages/ActivityLogs'
 
@@ -497,7 +497,7 @@ function App() {
 
             <DashboardLayout>
 
-              <StateMinisterDashboard />
+              <StateMinisterView />
 
             </DashboardLayout>
 
