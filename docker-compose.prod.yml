@@ -7,8 +7,8 @@ services:
       dockerfile: Dockerfile
     container_name: moa-backend-prod
     restart: unless-stopped
-    expose:
-      - "8000"
+    expose:                      # Change from 'ports' to 'expose'
+      - "8000"                   # Only expose internally to Docker network
     environment:
       - DJANGO_SETTINGS_MODULE=moa_agriplan_system.settings
       - DEBUG=False
@@ -20,11 +20,8 @@ services:
       - DB_PORT=5432
       - SECRET_KEY=django-insecure-88#b%1&6ku6g#eyb04)vd1)h5!)*y^79havgg(**w65ewhv+ln
       - ALLOWED_HOSTS=localhost,127.0.0.1,10.10.20.233,196.188.248.104,pms.moa.gov.et
-      - CORS_ALLOWED_ORIGINS=https://pms.moa.gov.et,http://localhost:3000
-      - CSRF_TRUSTED_ORIGINS=https://pms.moa.gov.et,http://localhost:3000
-      - SECURE_PROXY_SSL_HEADER=True
-      - SESSION_COOKIE_SECURE=True
-      - CSRF_COOKIE_SECURE=True
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://10.10.20.233:3000,http://10.10.20.233:8080,http://196.188.248.104:8080,http://pms.moa.gov.et
+      - CSRF_TRUSTED_ORIGINS=http://localhost:3000,http://10.10.20.233:3000,http://10.10.20.233:8080,http://196.188.248.104:8080,http://pms.moa.gov.et
     depends_on:
       - db-prod
 
@@ -33,24 +30,22 @@ services:
       context: ./frontend/planning-vite
       dockerfile: Dockerfile
       args:
-        - VITE_API_BASE_URL=https://pms.moa.gov.et
+        - VITE_API_BASE_URL=http://pms.moa.gov.et  # Use domain, not IP
     container_name: moa-frontend-prod
     restart: unless-stopped
-    expose:
-      - "80"
+    expose:                      # Change from 'ports' to 'expose'
+      - "80"                     # Only expose internally
     depends_on:
       - backend
 
-  nginx:
+  nginx:                         # Add this service if missing
     image: nginx:alpine
     container_name: moa-nginx-prod
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      - "80:80"                  # ONLY nginx publishes to host
     volumes:
-      - ./nginx/moa-planning-system-ssl.conf:/etc/nginx/conf.d/default.conf
-      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/moa-planning-system.conf:/etc/nginx/conf.d/default.conf
       - ./backend/static:/home/moapms/moa-planning-system/backend/static:ro
       - ./backend/media:/home/moapms/moa-planning-system/backend/media:ro
     depends_on:
@@ -68,7 +63,7 @@ services:
     volumes:
       - db_prod_data:/var/lib/postgresql/data
     ports:
-      - "5434:5432"
+      - "5434:5432"              # Database port if needed externally
 
 volumes:
   db_prod_data:
