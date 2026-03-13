@@ -38,6 +38,7 @@ ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=[
     '196.188.248.104',     # 👈 ADD THIS - Public IP
     'backend',
     'moa-backend-prod',
+    'pms.moa.gov.et',      # Add domain explicitly
 ])
 
 
@@ -174,7 +175,7 @@ CORS_ALLOWED_ORIGINS = [
     'http://196.188.248.104:8080',   # Public frontend on port 8080 (old)
     'http://196.188.248.104',        # Public frontend on port 80 (new)
     'http://pms.moa.gov.et',
-    'https://pms.moa.gov.et',         # Domain frontend on port 80
+    'https://pms.moa.gov.et',         # Domain frontend on port 443 (HTTPS)
     'http://localhost:5173',         # Local development frontend
     'http://localhost:5174',         # Local development frontend
 ]
@@ -190,10 +191,36 @@ CSRF_TRUSTED_ORIGINS = [
     'http://196.188.248.104:8000',   # Public backend
     'http://196.188.248.104',        # Public frontend on port 80 (new)
     'http://pms.moa.gov.et',
-    'https://pms.moa.gov.et',         # Domain frontend on port 80
+    'https://pms.moa.gov.et',         # Domain frontend on port 443 (HTTPS)
     'http://localhost:5173',         # Local development frontend
     'http://localhost:5174',         # Local development frontend
 ]
+
+# ========================
+# 👇 ADD THESE SECURITY SETTINGS FOR HTTPS
+# ========================
+
+# Security settings for production
+if not DEBUG:
+    # Tell Django to trust the X-Forwarded-Proto header from Nginx
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    
+    # Redirect all HTTP to HTTPS (Nginx handles this, but Django can also enforce)
+    SECURE_SSL_REDIRECT = False  # Set to False if Nginx handles redirect
+    
+    # Session & CSRF cookies only sent over HTTPS
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    
+    # HSTS - tell browsers to always use HTTPS for this domain
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    
+    # Other security headers (though Nginx also sets these)
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER = True
+    X_FRAME_OPTIONS = 'DENY'
 
 # Quarterly breakdown submission window (configurable via .env)
 # If BREAKDOWN_WINDOW_ALWAYS_OPEN is true, submission is allowed anytime.
