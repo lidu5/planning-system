@@ -50,7 +50,7 @@ services:
       - ./nginx/moa-planning-system-ssl.conf:/etc/nginx/conf.d/default.conf
       - ./backend/static:/home/moapms/moa-planning-system/backend/static:ro
       - ./backend/media:/home/moapms/moa-planning-system/backend/media:ro
-      - ./ssl:/etc/nginx/ssl:ro
+      - /home/moapms/moa-planning-system/ssl:/etc/nginx/ssl:ro  
     depends_on:
       - frontend
       - backend
