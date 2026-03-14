@@ -1,4 +1,8 @@
 const getApiBaseUrl = (): string => {
+  // Prefer explicit env override when provided at build time
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (envUrl) return envUrl;
+
   const hostname = window.location.hostname;
   
   // Map based on how user accessed the site
