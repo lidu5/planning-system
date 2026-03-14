@@ -3,7 +3,7 @@ const getApiBaseUrl = (): string => {
   
   // Map based on how user accessed the site
   if (hostname === 'pms.moa.gov.et') {
-    return 'http://pms.moa.gov.et';  // Domain access (port 80)
+    return 'https://pms.moa.gov.et';  // Domain access over HTTPS
   }
   if (hostname === '10.10.20.233') {
     return 'http://10.10.20.233:8000';  // LAN access
@@ -15,8 +15,8 @@ const getApiBaseUrl = (): string => {
     return 'http://localhost:8000';  // Local development
   }
   
-  // Default to domain
-  return 'http://pms.moa.gov.et';
+  // Default to domain over HTTPS
+  return 'https://pms.moa.gov.et';
 };
 
 export const API_BASE_URL = getApiBaseUrl();
