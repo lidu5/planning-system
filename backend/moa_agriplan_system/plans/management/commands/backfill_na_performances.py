@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 
 
 class Command(BaseCommand):
-    help = "Backfill N/A quarterly performances (value is null) to FINAL_APPROVED."
+    help = "Backfill N/A quarterly performances (value is null) to FINAL_APPROVED for non-applicable quarters only."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -33,11 +33,21 @@ class Command(BaseCommand):
             except User.DoesNotExist as exc:
                 raise CommandError(f"User with id {user_id} does not exist") from exc
 
-        qs = QuarterlyPerformance.objects.filter(value__isnull=True).exclude(
-            status=PerformanceStatus.FINAL_APPROVED
+        # Base set: N/A performances not already final approved
+        base_qs = (
+            QuarterlyPerformance.objects.select_related("plan__indicator")
+            .filter(value__isnull=True)
+            .exclude(status=PerformanceStatus.FINAL_APPROVED)
         )
 
-        count = qs.count()
+        # Keep only performances where the quarter is not applicable for the indicator (plan is effectively N/A)
+        to_update_ids = [
+            perf.id
+            for perf in base_qs
+            if not perf.plan.indicator.is_quarter_applicable(perf.quarter)
+        ]
+
+        count = len(to_update_ids)
         if count == 0:
             self.stdout.write(self.style.SUCCESS("No N/A performances require backfill."))
             return
@@ -45,14 +55,14 @@ class Command(BaseCommand):
         if dry_run:
             self.stdout.write(
                 self.style.WARNING(
-                    f"[DRY RUN] Would update {count} performance records to FINAL_APPROVED."
+                    f"[DRY RUN] Would update {count} performance records to FINAL_APPROVED (non-applicable quarters only)."
                 )
             )
             return
 
         now = timezone.now()
         with transaction.atomic():
-            qs.update(
+            QuarterlyPerformance.objects.filter(id__in=to_update_ids).update(
                 status=PerformanceStatus.FINAL_APPROVED,
                 final_approved_by_id=getattr(approver, "id", None),
                 final_approved_at=now,
@@ -60,6 +70,6 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Updated {count} performance records to FINAL_APPROVED (value was N/A)."
+                f"Updated {count} performance records to FINAL_APPROVED (non-applicable quarters only)."
             )
         )
