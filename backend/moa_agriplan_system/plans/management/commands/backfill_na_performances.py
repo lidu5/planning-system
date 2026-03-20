@@ -6,7 +6,10 @@ from django.contrib.auth import get_user_model
 
 
 class Command(BaseCommand):
-    help = "Backfill N/A quarterly performances (value is null) to FINAL_APPROVED for non-applicable quarters only."
+    help = (
+        "Backfill N/A quarterly performances (value is null) to FINAL_APPROVED "
+        "when the quarter is not applicable or the plan's quarterly value is missing."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -35,17 +38,26 @@ class Command(BaseCommand):
 
         # Base set: N/A performances not already final approved
         base_qs = (
-            QuarterlyPerformance.objects.select_related("plan__indicator")
+            QuarterlyPerformance.objects.select_related(
+                "plan__indicator", "plan__quarterly_breakdown"
+            )
             .filter(value__isnull=True)
             .exclude(status=PerformanceStatus.FINAL_APPROVED)
         )
 
-        # Keep only performances where the quarter is not applicable for the indicator (plan is effectively N/A)
-        to_update_ids = [
-            perf.id
-            for perf in base_qs
-            if not perf.plan.indicator.is_quarter_applicable(perf.quarter)
-        ]
+        # Keep only performances where the quarter is not applicable OR plan breakdown value is missing
+        to_update_ids = []
+        for perf in base_qs:
+            indicator = perf.plan.indicator
+            breakdown = getattr(perf.plan, "quarterly_breakdown", None)
+            q_field = f"q{perf.quarter}"
+            plan_q_value = getattr(breakdown, q_field, None) if breakdown else None
+
+            not_applicable = not indicator.is_quarter_applicable(perf.quarter)
+            missing_plan_value = plan_q_value is None
+
+            if not_applicable or missing_plan_value:
+                to_update_ids.append(perf.id)
 
         count = len(to_update_ids)
         if count == 0:
@@ -55,7 +67,7 @@ class Command(BaseCommand):
         if dry_run:
             self.stdout.write(
                 self.style.WARNING(
-                    f"[DRY RUN] Would update {count} performance records to FINAL_APPROVED (non-applicable quarters only)."
+                    f"[DRY RUN] Would update {count} performance records to FINAL_APPROVED (non-applicable or missing plan quarter)."
                 )
             )
             return
@@ -70,6 +82,6 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Updated {count} performance records to FINAL_APPROVED (non-applicable quarters only)."
+                f"Updated {count} performance records to FINAL_APPROVED (non-applicable or missing plan quarter)."
             )
         )
