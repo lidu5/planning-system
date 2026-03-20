@@ -652,17 +652,14 @@ class QuarterlyPerformanceViewSet(viewsets.ModelViewSet):
             if not within_quarter_submission_window(now, quarter):
                 return Response({'detail': 'Entry window closed for this quarter performance.'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # For N/A performances, allow setting status to SUBMITTED directly
-        if is_na_performance and status == 'SUBMITTED':
-            # Create the performance first
+        # For N/A performances, default status to FINAL_APPROVED
+        if is_na_performance:
             response = super().create(request, *args, **kwargs)
-            # Then update it to SUBMITTED status
             perf = QuarterlyPerformance.objects.get(id=response.data['id'])
-            perf.status = PerformanceStatus.SUBMITTED
-            perf.submitted_by = request.user
-            perf.submitted_at = timezone.now()
+            perf.status = PerformanceStatus.FINAL_APPROVED
+            perf.final_approved_by = request.user
+            perf.final_approved_at = timezone.now()
             perf.save()
-            # Return the updated performance
             serializer = self.get_serializer(perf)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         
@@ -689,7 +686,19 @@ class QuarterlyPerformanceViewSet(viewsets.ModelViewSet):
             now = timezone.now()
             if not within_quarter_submission_window(now, obj.quarter):
                 return Response({'detail': 'Entry window closed for this quarter performance.'}, status=status.HTTP_400_BAD_REQUEST)
-        return super().update(request, *args, **kwargs)
+        response = super().update(request, *args, **kwargs)
+
+        # Auto-final approve N/A performances after update
+        if is_na_performance:
+            obj.refresh_from_db()
+            obj.status = PerformanceStatus.FINAL_APPROVED
+            obj.final_approved_by = request.user
+            obj.final_approved_at = timezone.now()
+            obj.save()
+            serializer = self.get_serializer(obj)
+            return Response(serializer.data)
+
+        return response
 
     @action(detail=True, methods=['post'])
     def submit(self, request, pk=None):
