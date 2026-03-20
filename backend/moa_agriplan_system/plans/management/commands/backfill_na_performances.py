@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 
 class Command(BaseCommand):
     help = (
-        "Backfill N/A quarterly performances (value is null) to FINAL_APPROVED "
+        "Backfill quarterly performances to FINAL_APPROVED "
         "when the plan's quarterly value is missing (plan == null)."
     )
 
@@ -36,14 +36,12 @@ class Command(BaseCommand):
             except User.DoesNotExist as exc:
                 raise CommandError(f"User with id {user_id} does not exist") from exc
 
-        # Base set: N/A performances not already final approved
-        base_qs = (
-            QuarterlyPerformance.objects.select_related("plan__quarterly_breakdown")
-            .filter(value__isnull=True)
-            .exclude(status=PerformanceStatus.FINAL_APPROVED)
-        )
+        # Base set: performances not already final approved
+        base_qs = QuarterlyPerformance.objects.exclude(
+            status=PerformanceStatus.FINAL_APPROVED
+        ).select_related("plan__quarterly_breakdown")
 
-        # Keep only performances where the plan's quarterly value is missing (plan == null)
+        # Keep only performances where the plan's quarterly value is missing
         to_update_ids = []
         for perf in base_qs:
             breakdown = getattr(perf.plan, "quarterly_breakdown", None)
@@ -55,7 +53,7 @@ class Command(BaseCommand):
 
         count = len(to_update_ids)
         if count == 0:
-            self.stdout.write(self.style.SUCCESS("No N/A performances require backfill."))
+            self.stdout.write(self.style.SUCCESS("No performances require backfill."))
             return
 
         if dry_run:
